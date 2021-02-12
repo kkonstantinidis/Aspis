@@ -57,6 +57,7 @@ The tested dependencies versions for the local/remote machines are given next:
 | scipy | N/A | 1.4.1 |
 | mpi4py | N/A | 3.0.3 |
 | hdmedians | N/A | 0.13 |
+| networkx | N/A | 2.5 |
 
 The exact series of commands for the *local* machine is
 ```sh
@@ -87,6 +88,7 @@ conda install -y -c anaconda libgcc
 conda install -y -c anaconda pandas
 conda install -y -c anaconda scipy
 conda install -y -c anaconda mpi4py
+conda install -y -c anaconda networkx
 
 # Install hdmedians
 sudo apt-get install gcc && sudo apt-get install git
