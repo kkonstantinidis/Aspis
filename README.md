@@ -1,4 +1,4 @@
-# ByzShield
+# Aspis
 ByzShield's robust distributed ML framework implementation.
 
 This project builds on [DETOX] and implements our proposed ByzShield algorithm for robust distributed deep learning. Our placement involves three different techniques, namely MOLS, Ramanujan Case 1 & Ramanujan Case 2. It also includes three different types of attack on the DETOX framework.
@@ -186,7 +186,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `mode` | Robust aggregation method: `coord-median`, `bulyan`, `multi-krum`, `sign-sgd` or `geometric_median` (only supported in baseline). |
 | `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (proposed MOLS), `rama_one` (proposed Ramanujan Case 1), `rama_two` (proposed Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`. |
 | `eval-freq` | Frequency of iterations to backup trained model (for evaluation). |
-| `err-mode` | Byzantine attack to simulate: `rev_grad` (reversed gradient) or `constant` (constant gradient) or `foe` ("Fall of Empires"), refer to `src/model_ops/util.py` for details. |
+| `err-mode` | Byzantine attack to simulate: `rev_grad` (reversed gradient) or `constant` (constant gradient) or `foe` ("Fall of Empires") or `fixed_disagreement` (all q workers disagree with a fixed set of honest workers), refer to `src/model_ops/util.py` for details. |
 | `epochs` | Number of epochs to train. |
 | `max-steps` | Total number of iterations (across all epochs). |
 | `worker-fail` | Number of Byzantine workers, equal to *q* in paper. |
