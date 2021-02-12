@@ -186,7 +186,8 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `mode` | Robust aggregation method: `coord-median`, `bulyan`, `multi-krum`, `sign-sgd` or `geometric_median` (only supported in baseline). |
 | `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (proposed MOLS), `rama_one` (proposed Ramanujan Case 1), `rama_two` (proposed Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`. |
 | `eval-freq` | Frequency of iterations to backup trained model (for evaluation). |
-| `err-mode` | Byzantine attack to simulate: `rev_grad` (reversed gradient) or `constant` (constant gradient) or `foe` ("Fall of Empires") or `fixed_disagreement` (all q workers disagree with a fixed set of honest workers), refer to `src/model_ops/util.py` for details. |
+| `err-mode` | Byzantine attack to simulate: `rev_grad` (reversed gradient) or `constant` (constant gradient) or `foe` ("Fall of Empires"), refer to `src/model_ops/util.py` for details. |
+| `err-choice` | How adversaries choose which files to distort: `fixed_disagreement` (all q adversaries disagree with a fixed set of honest workers), otherwise they will distort all files. |
 | `epochs` | Number of epochs to train. |
 | `max-steps` | Total number of iterations (across all epochs). |
 | `worker-fail` | Number of Byzantine workers, equal to *q* in paper. |
