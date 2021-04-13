@@ -186,7 +186,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `dataset` | Data set: `MNIST`, `Cifar10`, `SVHN` or `Cifar100`. |
 | `batch-size` | Batchsize: equal to b in ByzShield, equal to br/K in DETOX, equal to b/K in vanilla batch-SGD (baseline). |
 | `mode` | Robust aggregation method: `coord-median`, `bulyan`, `multi-krum`, `sign-sgd` or `geometric_median` (only supported in baseline). |
-| `adversarial-detection` | Method used to detect and potentially exclude adversaries: `clique` (if a unique maximum clique of size K-q exists all other workers will be ignored). The surviving gradients must be aggregates with a `mode=coord-median` aggregator. If set to anything else, no detection will take place.  |
+| `adversarial-detection` | Method used to detect and potentially exclude adversaries: `clique` (if a unique maximum clique of size K-q exists all other workers will be ignored). The surviving gradients must be aggregated with a `mode=coord-median` aggregator. If set to anything else, no detection will take place.  |
 | `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (proposed MOLS), `rama_one` (proposed Ramanujan Case 1), `rama_two` (proposed Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`. |
 | `eval-freq` | Frequency of iterations to backup trained model (for evaluation). |
 | `err-mode` | Byzantine attack to simulate: `rev_grad` (reversed gradient) or `constant` (constant gradient) or `foe` ("Fall of Empires"), refer to `src/model_ops/util.py` for details. |
