@@ -195,7 +195,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `max-steps` | Total number of iterations (across all epochs). |
 | `worker-fail` | Number of Byzantine workers, equal to *q* in paper. |
 | `group-size` | Replication factor, equal to *r* in paper. |
-| `lis-simulation` | Attack ["A Little Is Enough"](https://arxiv.org/pdf/1902.06156.pdf): `simulate` (enabled) or `no` (disabled), the `err-mode` will be disabled if ALIE attack is enabled. |
+| `lis-simulation` | Attack ["A Little Is Enough"](https://arxiv.org/pdf/1902.06156.pdf): `simulate` (enabled) or `no` (disabled), the `err-mode` will be disabled/ignored if ALIE attack is enabled. |
 | `train-dir` | Directory to save model backups for evaluation (for AWS this should be the EFS folder). |
 | `local-remote` | `local` (for local training) or `remote` (for training on AWS). |
 | `rama-m` | Value of *m* (in paper), only needed for Ramanujan Case 2. |
