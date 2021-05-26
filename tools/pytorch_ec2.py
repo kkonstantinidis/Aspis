@@ -24,7 +24,7 @@ cfg = Cfg({
     "key_name": "virginiakey",          # ~ Necessary to ssh into created instances, WITHOUT .pem
     # Cluster topology
     "n_masters" : 1,                      # Should always be 1
-    "n_workers" : 25,
+    "n_workers" : 3,
     "num_replicas_to_aggregate" : "8", # deprecated, not necessary
     "method" : "spot",
     # Region speficiation
@@ -32,11 +32,11 @@ cfg = Cfg({
     "availability_zone" : "us-east-1d",
     # Machine type - instance type configuration.
     "master_type" : "i3.16xlarge",
-    "worker_type" : "c5.4xlarge",
+    "worker_type" : "r5n.24xlarge",
     # please only use this AMI for pytorch
-    "image_id": "ami-017571e50bb10c6b4",
+    "image_id": "ami-001c07ba086f358ba",
     # Launch specifications
-    "spot_price" : "10",                 # Has to be a string
+    "spot_price" : "5",                 # Has to be a string
     # SSH configuration
     "ssh_username" : "ubuntu",            # For sshing. E.G: ssh ssh_username@hostname
     "path_to_keyfile" : "virginiakey.pem", # ~ be careful with this path since the execution path depends on where you run the code from

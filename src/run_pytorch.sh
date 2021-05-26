@@ -1,28 +1,32 @@
 # ~ this is the main file to do everything after EC2 setup, do not use pytorch_ec2.py for tasks that are done here, it has dead code
 PROJECT_INDEX="$1"
-n=6
+n=16
 group_size=3
-bucket_size=10
-batch_size=500
+bucket_size=3
+batch_size=96
 rama_m=5
-eval_freq=50
-max_steps=600
-# lr_step=${eval_freq}
-lr_step=20
+eval_freq=100
+max_steps=2000
+lr_step=$((2*${eval_freq}))
+# lr_step=34
 checkpoint_step=0
 
 # approach=baseline
 # approach=maj_vote
+# approach=cyclic
 # approach=draco_lite
-# approach=draco_lite_attack
+approach=draco_lite_attack
 # approach=mols
 # approach=rama_one
 # approach=rama_two
-approach=subset
+# approach=subset
 
 err_mode=rev_grad
 # err_mode=constant
 # err_mode=foe
+
+# err_choice=all
+err_choice=fixed_disagreement
 
 # lis_simulation=simulate
 lis_simulation=nope
@@ -31,6 +35,13 @@ mode=coord-median
 # mode=bulyan
 # mode=multi-krum
 # mode=sign-sgd
+# mode=maj_vote
+
+# adversarial_detection=nope
+adversarial_detection=clique
+
+byzantine_gen=hard_coded
+# byzantine_gen=random
 
 # hostfile="tools/hosts_address"
 hostfile="tools/hosts_address_local"
@@ -44,13 +55,13 @@ detox_attack=worst
 
 # ~ test
 # for tuning with varying q
-tune_dir=${HOME}/shared/tune/BYZSHIELD${PROJECT_INDEX}
+tune_dir=${HOME}/shared/tune/ASPIS${PROJECT_INDEX}
 echo "Start parameter tuning ..."
-for q in 0
+for q in 2
 do
     for lr in 0.01
     do
-        for gamma in 1
+        for gamma in 0.7
         do
             START=$(date +%s.%N)
 
@@ -60,8 +71,8 @@ do
             python distributed_nn.py \
             --lr=${lr} \
             --momentum=0.9 \
-            --network=LeNet \
-            --dataset=MNIST \
+            --network=ResNet18 \
+            --dataset=Cifar10 \
             --batch-size=${batch_size} \
             --comm-type=Bcast \
             --mode=${mode} \
@@ -80,10 +91,12 @@ do
             --train-dir="${tune_dir}/output_q_${q}_lr_${lr}_gamma_${gamma}/" \
             --local-remote=${local_remote} \
             --rama-m=${rama_m} \
-            --byzantine-gen=hard_coded \
+            --byzantine-gen=${byzantine_gen} \
             --detox-attack=${detox_attack} \
             --gamma=${gamma} \
-            --lr-step=${lr_step}
+            --lr-step=${lr_step} \
+            --err-choice=${err_choice} \
+            --adversarial-detection=${adversarial_detection}
 
             END=$(date +%s.%N)
             DIFF=$(echo "$END - $START" | bc)
@@ -122,7 +135,7 @@ done
 
 
 # for local DETOX
-# mpirun -n 16 --hostfile "/home/kostas/Dropbox/Python Workspace/SGD/BYZSHIELD/tools/hosts_address_local" \
+# mpirun -n 16 --hostfile "/home/kostas/Dropbox/Python Workspace/SGD/ASPIS/tools/hosts_address_local" \
 # python distributed_nn.py \
 # --lr=0.001 \
 # --momentum=0.9 \
@@ -150,8 +163,8 @@ done
 # --detox-attack=worst
 
 
-# for local BYZSHIELD
-# mpirun -n 16 --hostfile "/home/kostas/Dropbox/Python Workspace/SGD/BYZSHIELD/tools/hosts_address_local" \
+# for local ASPIS
+# mpirun -n 16 --hostfile "/home/kostas/Dropbox/Python Workspace/SGD/ASPIS/tools/hosts_address_local" \
 # python distributed_nn.py \
 # --lr=0.001 \
 # --momentum=0.9 \

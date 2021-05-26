@@ -2,6 +2,8 @@
 from .utils import *
 from .baseline_master import SyncReplicasMaster_NN
 
+# from functools import reduce
+
 class CyclicMaster(SyncReplicasMaster_NN):
     def __init__(self, comm, **kwargs):
         '''master node here, no rank needed since the rank will always be 0 for master node'''

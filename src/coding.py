@@ -1,7 +1,8 @@
-# ~ imported but never used
+# ~ imported but used only for Draco
 import numpy as np
 from scipy.optimize import lsq_linear
 
+# ~ only for Draco cyclic code
 def search_w(n, s):
     # params: n: number of workers
     # params: s: number of fail workers
@@ -20,6 +21,7 @@ def search_w(n, s):
     return W, fake_W, W_perp, S, C_1
 
 
+# ~ only for Draco cyclic code
 def _construct_c(n):
     # complex matrix here
     _shape = (n, n)
@@ -36,6 +38,7 @@ def _construct_c(n):
     return C
 
 
+# ~ only for Draco cyclic code
 def _construct_w(n, hat_s):
     _shape=(n, n)
     W = np.ones(_shape)
@@ -52,6 +55,7 @@ def _construct_w(n, hat_s):
     return W
 
 
+# ~ only for Draco cyclic code
 def _cls_solving(C_1, fake_W):
     # return Q here:
     _shape = np.transpose(C_1).shape

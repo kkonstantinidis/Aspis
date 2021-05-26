@@ -11,6 +11,7 @@ from model_ops.densenet import *
 from model_ops.fc_nn import FC_NN, FC_NN_Split
 from model_ops.utils import err_simulation
 from model_ops.utils import float_type
+from model_ops.utils import ncr # ~ imports ncr()
 
 from torchvision.datasets import SVHN
 from coding import search_w
@@ -19,9 +20,11 @@ from worker import baseline_worker, rep_worker, cyclic_worker, draco_lite_worker
 
 from itertools import chain # ~ for the attack
 
+# ~ for ncr()
+# import operator as op
+# from functools import reduce
+
 # ~ for subset assignment
-import operator as op
-from functools import reduce
 from itertools import combinations
 
 SEED_ = 428
@@ -37,13 +40,26 @@ SEED_ = 428
 # ~ hard_byz_set: dictionary, key: K, value: dictionary (key: q, value: list with worst-case Byzantine workers)
 # Caution: this supports only one particular scheme for each value of K (hard-coded)
 hard_byz_set = {
-                # K=5, l=6, r=3, Subset assignment, worst-case Byzantine sets for some values of q
-                5: {0:np.array([]), 
+                # K=5, l=(4 choose 2)=6, r=3, Subset assignment, one worst-case Byzantine sets for some values of q but for this scheme you can choose anything you want
+                5: {0:np.array([]),
                 1:np.array([1]),
                 2:np.array([1,2])},
                 
+                # K=7, l=(6 choose 2)=15, r=3, Subset assignment, one worst-case Byzantine sets for some values of q but for this scheme you can choose anything you want
+                7: {0:np.array([]),
+                1:np.array([1]),
+                2:np.array([1,2]),
+                3:np.array([1,2,3])},
+                
+                # K=10, l=(9 choose 2)=36, r=3, Subset assignment, one worst-case Byzantine sets for some values of q but for this scheme you can choose anything you want
+                10: {0:np.array([]),
+                1:np.array([1]),
+                2:np.array([1,2]),
+                3:np.array([1,2,3]),
+                4:np.array([1,2,3,4])},
+                
                 # K=15, l=5, r=3, MOLS/Rama Case 1, worst-case Byzantine sets for some values of q
-                15: {0:np.array([]), 
+                15: {0:np.array([]),
                 1:np.array([1]),
                 2:np.array([1,6]),
                 3:np.array([1,6,12]),
@@ -54,7 +70,7 @@ hard_byz_set = {
                 8:np.array([1,2,3,4,5,6,7,8])}, # ~ use q >= 8 just for debugging
             
                 # K=35, l=7, r=5, MOLS/Rama Case 1, worst-case Byzantine sets for some values of q
-                35: {0:np.array([]), 
+                35: {0:np.array([]),
                 1:np.array([1]),
                 2:np.array([1,2]),
                 3:np.array([1,8,15]),
@@ -70,7 +86,7 @@ hard_byz_set = {
                 13:np.array([1,2,3,8,9,10,16,22,26,28,31,32,33])},
             
                 # K=25, l=5, r=5, Rama Case 2, worst-case Byzantine sets for some values of q
-                25: {0:np.array([]), 
+                25: {0:np.array([]),
                 1:np.array([1]),
                 2:np.array([1,2]),
                 3:np.array([1,6,11]),
@@ -264,7 +280,8 @@ def _assign(world_size, group_size, rank): # ~ world_size == no. of workers here
         ret_group_dict[i]=l
     return ret_group_dict, group_list # ~ both have the same information, the dictionary is indexed with group counter
 
-
+# ~ Returns:
+# list (one element for each iteration) of 1D np.ndarray (ranks of adversaries of the iteration) 
 def _generate_adversarial_nodes(args, world_size): # ~ world_size == no. of workers + 1 here
     # ~ generate indices of adversarial compute nodes randomly for all iterations at the beginning
     np.random.seed(SEED_) # ~ this will make the assignment consistent for all machines
@@ -400,12 +417,12 @@ def mols_groups(args, K, rank): # K == no. of workers
         return ret_group_dict, seeds_dict[rank], list(ret_group_dict.keys())
 
 
-# Returns n choose r
-def ncr(n, r):
-    r = min(r, n-r)
-    numer = reduce(op.mul, range(n, n-r, -1), 1)
-    denom = reduce(op.mul, range(1, r+1), 1)
-    return numer // denom  # or / in Python 2
+# ~ Returns n choose r
+# def ncr(n, r):
+    # r = min(r, n-r)
+    # numer = reduce(op.mul, range(n, n-r, -1), 1)
+    # denom = reduce(op.mul, range(1, r+1), 1)
+    # return numer // denom  # ~ or / in Python 2
 
 
 # ~ Decides file assignment for subset assignment scheme.
@@ -578,11 +595,14 @@ def prepare(args, rank, world_size):
                     'adversaries':adversaries,
                     'device':device
                     }
+    # ~ Draco repetition code
     # majority vote
     elif args.approach == "maj_vote":
         adversaries = _generate_adversarial_nodes(args, world_size)
         group_list, group_num, group_seeds=group_assign(world_size-1, args.group_size, rank) # ~ exclude the PS from grouping assignments
         train_loader, training_set, test_loader = load_data(dataset=args.dataset, seed=group_seeds[group_num], args=args, rank=rank)
+        
+        # ~ Note: for the following some arguments used by other approaches have been removed
         kwargs_master = {
                     'batch_size':args.batch_size, 
                     'learning_rate':args.lr, 
@@ -594,12 +614,24 @@ def prepare(args, rank, world_size):
                     'eval_freq':args.eval_freq, 
                     'train_dir':args.train_dir, 
                     'group_list':group_list, 
-                    'update_mode':args.mode, 
+                    'group_num':group_num,
+                    'update_mode':args.mode,
+                    'bucket_size':args.bucket_size,
                     'compress_grad':args.compress_grad, 
                     'checkpoint_step':args.checkpoint_step,
-                    'device':device
+                    'lis_simulation':args.lis_simulation,
+                    'worker_fail':args.worker_fail,
+                    'device':device,
+                    'adversaries':adversaries,
+                    'gamma':args.gamma,
+                    'lr_step':args.lr_step,
+                    'err_mode':args.err_mode,
+                    'adversarial_detection':args.adversarial_detection, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'approach':args.approach, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'err_choice':args.err_choice # ~ won't be used by DETOX, only by ByzShield (Aspis)
                     } # ~ group_list is stored in PS dict
         kwargs_worker = {
+                    'update_mode':args.mode,  # for implementing signSGD
                     'batch_size':args.batch_size, 
                     'learning_rate':args.lr, 
                     'max_epochs':args.epochs, 
@@ -616,14 +648,79 @@ def prepare(args, rank, world_size):
                     'compress_grad':args.compress_grad, 
                     'eval_freq':args.eval_freq, 
                     'train_dir':args.train_dir,
+                    'checkpoint_step':args.checkpoint_step,
                     'adversaries':adversaries,
-                    'device':device
+                    'lis_simulation':args.lis_simulation,
+                    'device':device,
+                    'err_choice':args.err_choice # ~ won't be used by DETOX, only by ByzShield (Aspis)
                     } # ~ group_list, group_seeds, group_num & adversaries are stored in worker's dict
+    # # ~ Draco cyclic code
+    # # cyclic code   
+    # elif args.approach == "cyclic":
+        # adversaries = _generate_adversarial_nodes(args, world_size)
+        # W, fake_W, W_perp, S, C_1 = search_w(world_size-1, args.worker_fail)
+        # train_loader, training_set, test_loader = load_data(dataset=args.dataset, seed=SEED_, args=args, rank=rank)
+        
+        # # ~ Note: for the following some arguments used by other approaches have been removed
+        # kwargs_master = {
+                    # 'batch_size':args.batch_size, 
+                    # 'learning_rate':args.lr, 
+                    # 'max_epochs':args.epochs, 
+                    # 'max_steps':args.max_steps, 
+                    # 'momentum':args.momentum, 
+                    # 'network':args.network,
+                    # 'comm_method':args.comm_type, 
+                    # 'eval_freq':args.eval_freq, 
+                    # 'train_dir':args.train_dir,
+                    # 'update_mode':args.mode,
+                    # 'bucket_size':args.bucket_size,
+                    # 'compress_grad':args.compress_grad, 
+                    # 'checkpoint_step':args.checkpoint_step,
+                    # 'lis_simulation':args.lis_simulation,
+                    # 'worker_fail':args.worker_fail,
+                    # 'device':device,
+                    # 'adversaries':adversaries,
+                    # 'gamma':args.gamma,
+                    # 'lr_step':args.lr_step,
+                    # 'err_mode':args.err_mode,
+                    # 'adversarial_detection':args.adversarial_detection, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    # 'approach':args.approach, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    # 'err_choice':args.err_choice, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    # 'W_perp':W_perp, # ~ only for Draco cyclic code
+                    # 'W':W, # ~ only for Draco cyclic code
+                    # 'decoding_S':S, # ~ only for Draco cyclic code
+                    # 'C_1':C_1 # ~ only for Draco cyclic code
+                    # }
+        # kwargs_worker = {
+                    # 'update_mode':args.mode,  # for implementing signSGD
+                    # 'batch_size':args.batch_size, 
+                    # 'learning_rate':args.lr, 
+                    # 'max_epochs':args.epochs, 
+                    # 'max_steps':args.max_steps,
+                    # 'momentum':args.momentum, 
+                    # 'network':args.network,
+                    # 'comm_method':args.comm_type, 
+                    # 'adversery':args.adversarial, 
+                    # 'worker_fail':args.worker_fail,
+                    # 'err_mode':args.err_mode,
+                    # 'compress_grad':args.compress_grad, 
+                    # 'eval_freq':args.eval_freq, 
+                    # 'train_dir':args.train_dir,
+                    # 'checkpoint_step':args.checkpoint_step,
+                    # 'adversaries':adversaries,
+                    # 'lis_simulation':args.lis_simulation,
+                    # 'device':device,
+                    # 'err_choice':args.err_choice, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    # 'encoding_matrix':W, # ~ only for Draco cyclic code (but not used)
+                    # 'seed':SEED_, # ~ only for Draco cyclic code
+                    # 'fake_W':fake_W # ~ only for Draco cyclic code
+                    # }
+        
     # ~ draco lite & all other Kostas cases
     elif args.approach == "draco_lite" or args.approach == "draco_lite_attack" or args.approach == "mols" or args.approach == "rama_one" or args.approach == "rama_two" or args.approach == "subset":
         seeds = epoch_seeds(args.epochs) # ~ won't be used by DETOX, only by ByzShield
         if args.approach == "draco_lite":
-            adversaries = _generate_adversarial_nodes(args, world_size) # ~ randomly chooses the adversaries at the beginning of training
+            adversaries = _generate_adversarial_nodes(args, world_size) # ~ chooses the adversaries at the beginning of training randomly or from a predefined list
             group_list, group_num, group_seeds=group_assign(world_size-1, args.group_size, rank)
             train_loader, training_set, test_loader = load_data(dataset=args.dataset, seed=group_seeds[group_num], args=args, rank=rank) # loader seeds for torch are set here but are they persistent ??? they are set later too
         elif args.approach == "draco_lite_attack": # ~ draco lite Kostas attack
@@ -663,7 +760,7 @@ def prepare(args, rank, world_size):
             # See top of file for more details
             c_q_max[world_size-1] = {} # needed for dictionary initialization
             c_q_max[world_size-1][args.worker_fail] = ncr(2*args.worker_fail, args.group_size)//2
-        
+            
         # ~ this is the same for all of the above cases
         kwargs_master = {
                     'batch_size':args.batch_size, 
@@ -688,7 +785,10 @@ def prepare(args, rank, world_size):
                     'c_q_max':c_q_max[world_size-1][args.worker_fail], # ~ won't be used by DETOX, only by ByzShield
                     'gamma':args.gamma,
                     'lr_step':args.lr_step,
-                    'err_mode':args.err_mode
+                    'err_mode':args.err_mode,
+                    'adversarial_detection':args.adversarial_detection, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'approach':args.approach, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'err_choice':args.err_choice # ~ won't be used by DETOX, only by ByzShield (Aspis)
                     }
         kwargs_worker = {
                     'update_mode':args.mode,  # for implementing signSGD
@@ -712,7 +812,8 @@ def prepare(args, rank, world_size):
                     'adversaries':adversaries,
                     'lis_simulation':args.lis_simulation,
                     'device':device,
-                    'seeds':seeds # ~ won't be used by DETOX, only by ByzShield
+                    'seeds':seeds, # ~ won't be used by DETOX, only by ByzShield
+                    'err_choice':args.err_choice # ~ won't be used by DETOX, only by ByzShield (Aspis)
                     }
     datum = (train_loader, training_set, test_loader)
     return datum, kwargs_master, kwargs_worker

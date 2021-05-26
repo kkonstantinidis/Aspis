@@ -324,7 +324,7 @@ class SyncReplicasMaster_NN(NN_Trainer):
 
     def meset_grad_buffer(self):
         for i in range(len(self._grad_aggregate_buffer)):
-            if self._update_mode in ("normal", "bulyan", "multi-krum", "coord-median", "sign-sgd"):
+            if self._update_mode in ("normal", "maj_vote", "bulyan", "multi-krum", "coord-median", "sign-sgd"):
                 self._grad_aggregate_buffer[i] = np.zeros(self._grad_aggregate_buffer[i].shape, dtype=float_type)
             elif self._update_mode in ("geometric_median", "krum"):
                 self._grad_aggregate_buffer[i] = []

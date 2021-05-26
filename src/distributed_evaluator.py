@@ -90,7 +90,9 @@ class DistributedEvaluator(NN_Trainer):
         self._layer_cur_step = []
         
         # ~ for file to write loss, top-1 and top-5 accuracies
-        self.outputF = open(self._model_dir + self._model_dir.split('/')[-2] + ".txt", "w+")
+        top1_filename = '/'.join(self._model_dir.split('/')[:-2]) + '/' + self._model_dir.split('/')[-2] + ".txt"
+        self.outputF = open(top1_filename, "w+")
+        logger.info("Writing to file {}".format(top1_filename))
         self.test_losses = "test_loss = [" # ~ will be Matlab-style
         self.prec1s = "prec1 = ["
         self.prec5s = "prec5 = ["

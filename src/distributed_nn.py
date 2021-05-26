@@ -101,6 +101,10 @@ def add_fit_args(parser):
                         help='Learning rate decay (linear)')
     parser.add_argument('--lr-step', type=int, default=100000000000000000, metavar='N',
                         help='Frequency of learning rate decay')
+    parser.add_argument('--err-choice', type=str, default='all', metavar='N',
+                        help='Logic according to which adversaries choose which files to distort')
+    parser.add_argument('--adversarial-detection', type=str, default='nope', metavar='N',
+                        help='Detection mechanism used by the PS to detect adversaries')
     args = parser.parse_args()
     return args
 
@@ -236,4 +240,21 @@ if __name__ == "__main__": # ~ PS and workers will call this
             logger.info("ByzShield: I am worker: {} in all {} workers, next step: {}".format(coded_worker.rank, coded_worker.world_size-1, coded_worker.next_step))
             coded_worker.train(train_loader=train_loader, test_loader=test_loader)
             logger.info("ByzShield: Now the next step is: {}".format(coded_worker.next_step))
-        
+    # # cyclic code
+    # elif args.approach == "cyclic":
+        # W, fake_W, W_perp, S, C_1 = search_w(world_size-1, args.worker_fail)
+        # # for debug print
+        # #np.set_printoptions(precision=4,linewidth=200.0)
+        # _, training_set, test_loader = datum
+        # if rank == 0:
+            # cyclic_master = cyclic_master.CyclicMaster(comm=comm, **kwargs_master)
+            # cyclic_master.build_model()
+            # logger.info("I am the master: the world size is {}, cur step: {}".format(cyclic_master.world_size, cyclic_master.cur_step))
+            # cyclic_master.start()
+            # logger.info("Done sending messages to workers!")
+        # else:
+            # cyclic_worker = cyclic_worker.CyclicWorker(comm=comm, **kwargs_worker)
+            # cyclic_worker.build_model()
+            # logger.info("I am worker: {} in all {} workers, next step: {}".format(cyclic_worker.rank, cyclic_worker.world_size-1, cyclic_worker.next_step))
+            # cyclic_worker.train(training_set=training_set, test_loader=test_loader)
+            # logger.info("Now the next step is: {}".format(cyclic_worker.next_step))

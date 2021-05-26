@@ -8,6 +8,10 @@ CONST_ = -100
 float_type = np.float32
 # float_type = np.float64
 
+# ~ for ncr()
+import operator as op
+from functools import reduce
+
 # ~ "*" is element-wise multiplication in numpy
 def err_simulation(grad, mode, cyclic=False):
     if mode == "rev_grad":
@@ -30,3 +34,11 @@ def err_simulation(grad, mode, cyclic=False):
         return grad
     elif mode == "foe":
         return grad
+        
+
+# ~ Returns n choose r
+def ncr(n, r):
+    r = min(r, n-r)
+    numer = reduce(op.mul, range(n, n-r, -1), 1)
+    denom = reduce(op.mul, range(1, r+1), 1)
+    return numer // denom  # ~ or / in Python 2

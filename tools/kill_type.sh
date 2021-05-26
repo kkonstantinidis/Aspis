@@ -4,10 +4,10 @@
 # typeToStop="r3.large"
 
 # Instance type to terminate
-typeToKill="c3.4xlarge"
+typeToKill="c5.4xlarge"
 
 # Time to wait before terminating
-sleepSec="180m"
+sleepSec="300m"
 # sleepSec="15"
 
 sleep $sleepSec

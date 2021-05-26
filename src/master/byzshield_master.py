@@ -7,6 +7,11 @@ import torch.optim as optim
 from joblib import Parallel, delayed
 from functools import reduce
 
+# ~ for clique detection
+import networkx as nx
+from itertools import product
+from collections import Counter
+
 logging.basicConfig()
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -92,6 +97,26 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
         self._c_q_max = kwargs['c_q_max'] # ~ maximum no. of distorted files after majority voting (currently hard-coded)
         
         self._err_mode = kwargs['err_mode']
+        
+        self._adversarial_detection = kwargs['adversarial_detection'] # ~ method used by the PS to detect adversaries
+        
+        self._approach = kwargs['approach']
+        
+        # ~ Ranks of all workers
+        self.all_workers = set(range(1, self.world_size))
+        
+        self._err_choice = kwargs['err_choice'] # ~ (needed here for ALIE/FoE) if set to 'fixed_disagreement', the adversaries will only distort files of groups where all honest workers are in a fixed disagreement set. If set to 'all', the adversaries will distort all files.
+        
+        # ~ Files in which all participants are adversaries (used if detection is enabled)
+        self.fullyDistortedFiles = []
+        
+        # ~ test
+        # logger.info("DEBUG_PS_BYZ: self._group_list: {}".format(self._group_list))
+        # logger.info("DEBUG_PS_BYZ: self.workerFileHt: {}".format(self.workerFileHt))
+        # logger.info("DEBUG_PS_BYZ: self._adversarial_detection: {}".format(self._adversarial_detection))
+        # logger.info("DEBUG_PS_BYZ: self._approach: {}".format(self._approach))
+        # logger.info("DEBUG_PS_BYZ: self.num_workers: {}".format(self.num_workers))
+        # logger.info("DEBUG_PS_BYZ: self._group_size: {}".format(self._group_size))
 
     def build_model(self):
         # ~ test
@@ -276,7 +301,8 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             self.cur_step += 1
             
             # ~ test
-            break
+            # if self.cur_step == 3:
+                # break
 
     # ~ just stores each received gradient in self._coded_grads_buffer
     # Arguments:
@@ -300,23 +326,93 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             assert self._coded_grads_buffer[file][v.index(source)][layer_idx].shape == file_grad.shape
             self._coded_grads_buffer[file][v.index(source)][layer_idx] = file_grad
             
-            # ~ test
-            # lay = 0 # ~ layer index
-            # if source == 5: # ~ worker with rank 2
+            # ~ test            
+            # if self.cur_step == 2:
+                # lay = 0 # ~ layer index (0-indexed)
+                # # if source == 1: # ~ worker with rank ...
                 # if layer_idx == lay:
                     # np.save('PS_worker'+str(source)+'_grads_layer'+str(lay)+'_file'+str(file), self._coded_grads_buffer[file][v.index(source)][layer_idx])
-
+                        
+        
     def _model_update(self):
         if self.cur_step % self.lr_step == 0:
             self.optimizer.lr_update(updated_lr=(self.lr * self.gamma ** (self.cur_step // self.lr_step)))
-        self.optimizer.step(grads=self._grad_aggregate_buffer, mode="byzshield")
+        self.optimizer.step(grads=self._grad_aggregate_buffer, mode="byzshield") # ~ Keep it as "byzshield" for both BYZSHIELD and ASPIS, no need to bother as the function does the same thing in both cases.
 
     # multi-core optimized verion
     def _draco_lite_aggregation(self):
-        self._grad_majority_vote()
+    
+        # ~ test
+        # lay = 0 # ~ layer index (0-indexed)
+        # if self.cur_step == 2:
+            # for file in self._group_list:
+                # group = self._group_list[file]
+                # for worker in group:
+                    # for layer_idx, _ in enumerate(self.network.parameters()):
+                        # if layer_idx == lay:
+                            # np.save('PS_received_worker'+str(worker)+'_grads_layer'+str(lay)+'_file'+str(file), self._coded_grads_buffer[file][group.index(worker)][layer_idx])
+    
+        # logger.info("_draco_lite_aggregation_buffer before shape: {}".format(self._draco_lite_aggregation_buffer.shape))
+        
+        if self._adversarial_detection == "clique":
+            # ~ Try to find and exclude the adversaries
+            self._attempt_detection()
+        
+            if len(self.maxCliques) > 1:
+                # ~ test
+                # logger.info("DEBUG_PS_BYZ: DETECTION CASE 1...")
+                
+                # ~ Case 1: There are multiple maximum cliques so detection is infeasible, resort to the classic majority voting
+                self._grad_majority_vote()
+            elif len(self.detectedWorkers) < self._s:
+                # ~ test
+                # logger.info("DEBUG_PS_BYZ: DETECTION CASE 2...")
+                
+                # ~ Case 2: There is a unique maximum clique but less than q adversaries have been detected.
+                # In this case, perform a "fast" majority vote, i.e., arbitrarily pick any gradient within each group since all of them have been filtered in _attempt_detection() to be identical
+                self._grad_fast_majority_vote()
+            elif len(self.detectedWorkers) == self._s:
+                # ~ test
+                # logger.info("DEBUG_PS_BYZ: DETECTION CASE 3...")
+                
+                # ~ Case 3: There is a unique maximum clique and all q adversaries have been detected.
+                # As in Case 2, we will arbitrarily pick one gradient within each group and then perform average across all of them (1 bucket, no median) assuming that we use "self._update_mode == coord-median".
+                self._grad_fast_majority_vote()
+                self.num_buckets = 1
+            else:
+                # Throw an error, this is not possible
+                assert 0 == 1
+                
+            # ~ Throw away all fully distorted files after detection (optional).
+            # Note: it has been tested only with "coord-median"
+            if len(self.fullyDistortedFiles) > 0:
+                # ~ out-of-place deletion of the corresponding rows (0-th dimension)
+                self._draco_lite_aggregation_buffer = np.delete(self._draco_lite_aggregation_buffer, self.fullyDistortedFiles, axis = 0)
+                
+                # ~ Update no. of buckets accordingly so that there are no empty slices during aggregation
+                self._bucket_size = min(self._bucket_size, self._draco_lite_aggregation_buffer.shape[0])
+                
+                # ~ test
+                # logger.info("Updated _bucket_size: {}".format(self._bucket_size))
+
+
+        else:
+            # ~ Detection is disabled, resort to the classic majority voting
+            self._grad_majority_vote()
+            
+        # ~ test
+        # lay = 0 # ~ layer index (0-indexed)
+        # if self.cur_step == 2:
+            # for file in self._group_list:
+                # group = self._group_list[file]
+                # for worker in group:
+                    # for layer_idx, _ in enumerate(self.network.parameters()):
+                        # if layer_idx == lay:
+                            # np.save('PS_filtered_worker'+str(worker)+'_grads_layer'+str(lay)+'_file'+str(file), self._coded_grads_buffer[file][group.index(worker)][layer_idx])
         
         # ~ test
         # writeVarsLog(self, "PS_after_majority")
+        # logger.info("_draco_lite_aggregation_buffer after shape: {}".format(self._draco_lite_aggregation_buffer.shape))
 
         # optimization objectives:
         # i) get rid of concated_grads and making it predefined
@@ -327,7 +423,9 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             
             # bucketing stage
             
-            indices = np.arange(self._sub_grad_size) # ~ 1D np.ndarray [0,...,f-1]
+            # ~ 1D np.ndarray [0,...,f-1]
+            # Note: the # of ignored files is subtracted
+            indices = np.arange(self._sub_grad_size - len(self.fullyDistortedFiles))
             
             # ~ in-place random shuffling, changes assignment of votes to buckets
             # needs to be commented for reproducibility if you do median-of-means, for just mean or median it should have no effect
@@ -340,6 +438,9 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             grad_mean = [np.mean(x, axis=0) for x in buckets]
             aggr_res = np.median(np.array(grad_mean), axis=0)
             aggr_res = np.squeeze(aggr_res) # ~ removes extra dimension of size 1 to match shape with that of method 1
+            
+            # ~ test
+            # logger.info("indices,  grad_transformer.shape, self.fullyDistortedFiles: {}, {}, {}".format(sorted(indices), grad_transformer.shape, self.fullyDistortedFiles))
             
             # ~ method 1 (all code below except debugging code should not be used if method 2 is uncommented)
             # splits "indices" 1D np.ndarray into self._bucket_size lists of equal-sized 1-D np.ndarrays of length f/self._bucket_size == no. of buckets.
@@ -390,9 +491,8 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             # logger.info("DEBUG_PS_BYZ: aggr_res: {} {}".format(type(aggr_res), aggr_res.shape))
             
         elif self._update_mode == "sign-sgd":
-            # Below, you need to one method, say "method x" and uncomment the corresponding lines labeled "method x"
+            # ~ Below, you need to use one method, say "method x" and uncomment the corresponding lines labeled "method x"
             
-            #logger.info("Draco-lite aggregation buffer shape: {}".format(self._draco_lite_aggregation_buffer.shape))
             indices = np.arange(self._sub_grad_size)
             np.random.seed()
             np.random.shuffle(indices) # ~ comment for reproducibility
@@ -609,11 +709,13 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
                         
                     # ~ test
                     # if k == 0: # ~ k-th group (file)
-                    # np.save('BYZSHIELD_coded_grads_buffer_groupInd_'+str(k)+'_workerInGroupInd_'+str(i)+'_lay'+str(j), elem[j])
+                    # np.save('BYZSHIELD_coded_grads_buffer_file_'+str(k)+'_workerInGroupInd_'+str(i)+'_lay'+str(j), elem[j])
                         
                 # ~ test
+                # lay = 0
                 # if k == 0: # ~ k-th group (file)
-                # np.save('BYZSHIELD_draco_lite_aggregation_buffer_groupInd_'+str(k)+'_lay'+str(j), _maj_grad)
+                # if j == lay: # ~ j-th layer
+                    # np.save('BYZSHIELD_draco_lite_aggregation_buffer_file_'+str(k)+'_lay'+str(j), _maj_grad)
                         
                 # ~ just a check that the gradient shape matches with the final shape for model update
                 try:
@@ -625,6 +727,36 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
                 # the row is indexed by file and the column is indexed by "flattened" layer dimensions
                 self._draco_lite_aggregation_buffer[k, index_pointer:index_pointer+grad_size] = _maj_grad.reshape(-1)
                 index_pointer += grad_size
+                
+                
+    # ~ This function is paired with adversarial detection. It is same as _grad_majority_vote() but within each group it picks one arbitrary gradient as the output to be used in robust aggregation.
+    # Note: this assumes that all r gradients of the group are identical.
+    # See comments in _grad_majority_vote().
+    def _grad_fast_majority_vote(self):
+        for k, v in self._coded_grads_buffer.items(): # ~ for each file
+            index_pointer = 0
+            for j, p in enumerate(self.network.parameters()): # ~ for each layer
+                grad_size = reduce((lambda x, y: x * y), p.size())
+
+                for i, elem in enumerate(v): # ~ for each worker with file k, enumeration never used
+                    # ~ Pick the gradient for the current layer from the first worker in the group and don't check the rest of them
+                    _maj_grad = elem[j]
+                    break
+                        
+                # ~ test
+                # lay = 0
+                # if k == 0: # ~ k-th group (file)
+                # if j == lay: # ~ j-th layer
+                    # np.save('BYZSHIELD_draco_lite_aggregation_buffer_file_'+str(k)+'_lay'+str(j), _maj_grad)
+
+                try:
+                    assert self._grad_aggregate_buffer[j].shape == _maj_grad.shape
+                except AssertionError as e:
+                    warnings.warn("Gradient shapes incompatible, deprecated! ")
+
+                self._draco_lite_aggregation_buffer[k, index_pointer:index_pointer+grad_size] = _maj_grad.reshape(-1)
+                index_pointer += grad_size
+                
 
     # ~ reset 1st and 3rd stage output buffers
     def meset_grad_buffer(self):
@@ -641,14 +773,25 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
         """
         self.__z = 1.0
         
-        # ~ new random choice, this set of Byzantines for ALIE may be different than the Byzantines chosen at the start of iteration
+        # ~ new random choice, this set of Byzantines for ALIE may be different than the Byzantines chosen at the start of iteration, must be WRONG as it returns values in [0,1,...q-1]
         # dummpy_adversarial_nodes = np.random.choice(self.num_workers, self._s, replace=False)
         
         # ~ option 2: choice of Byzantines won't change for ALIE
         dummpy_adversarial_nodes = self._fail_workers[self.cur_step]
         
         # ~ test
-        # logger.info("DEBUG_PS_BYZ: ALIE byzantines: {}".format(dummpy_adversarial_nodes))
+        logger.info("DEBUG_PS_BYZ: ALIE byzantines: {}".format(dummpy_adversarial_nodes))
+        
+        #################################################################################################################################
+        # ~ Code for the fixed disagreement attack (useful with subset assignment)
+        # Note: see comments in worker's code as it is almost same
+        #################################################################################################################################
+        cur_step_adversaries = set(dummpy_adversarial_nodes)
+        
+        cur_step_honest = self.all_workers - cur_step_adversaries
+        
+        cur_step_D = set(sorted(cur_step_honest)[:len(cur_step_adversaries)])
+        #################################################################################################################################
         
         # ~ first it collects the j-th layer gradient from all files of all workers
         for j, _ in enumerate(self.network.parameters()):
@@ -661,11 +804,29 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
 
             for adv_index in dummpy_adversarial_nodes:
                 for k, v in self._coded_grads_buffer.items():
-                    if adv_index in self._group_list[k]:
-                        _mal_grad = mu + self.__z * sigma # ~ malicious gradient for current layer
-                        _relative_index_in_group = self._group_list[k].index(adv_index)
-                        assert self._coded_grads_buffer[k][_relative_index_in_group][j].shape == _mal_grad.shape
-                        self._coded_grads_buffer[k][_relative_index_in_group][j] =  mu + self.__z * sigma
+                    if self._err_choice == 'all':
+                        if adv_index in self._group_list[k]:
+                            _mal_grad = mu + self.__z * sigma # ~ malicious gradient for current layer
+                            _relative_index_in_group = self._group_list[k].index(adv_index)
+                            assert self._coded_grads_buffer[k][_relative_index_in_group][j].shape == _mal_grad.shape
+                            self._coded_grads_buffer[k][_relative_index_in_group][j] =  mu + self.__z * sigma
+                    elif self._err_choice == 'fixed_disagreement':
+                        # ~ Note: see comments in worker's code as it is almost same
+                        
+                        group = set(self._group_list[k])
+                        
+                        cur_group_adversaries = cur_step_adversaries & group
+                        
+                        cur_group_honest = group - cur_group_adversaries
+                        
+                        if adv_index in group and cur_group_honest.issubset(cur_step_D):
+                            # ~ same as above
+                            _mal_grad = mu + self.__z * sigma # ~ malicious gradient for current layer
+                            _relative_index_in_group = self._group_list[k].index(adv_index)
+                            assert self._coded_grads_buffer[k][_relative_index_in_group][j].shape == _mal_grad.shape
+                            self._coded_grads_buffer[k][_relative_index_in_group][j] =  mu + self.__z * sigma                    
+                    else: # ~ invalid
+                        assert 0 == 1, "Error: Unknown adversarial distortion choice!"
 
 
     # ~ Fall of Empires attack
@@ -680,7 +841,18 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
         dummpy_adversarial_nodes = self._fail_workers[self.cur_step]
         
         # ~ test
-        # logger.info("DEBUG_PS_BYZ: FoE byzantines: {}".format(dummpy_adversarial_nodes))
+        logger.info("DEBUG_PS_BYZ: FoE byzantines: {}".format(dummpy_adversarial_nodes))
+        
+        #################################################################################################################################
+        # ~ Code for the fixed disagreement attack (useful with subset assignment)
+        # Note: see comments in worker's code as it is almost same
+        #################################################################################################################################
+        cur_step_adversaries = set(dummpy_adversarial_nodes)
+        
+        cur_step_honest = self.all_workers - cur_step_adversaries
+        
+        cur_step_D = set(sorted(cur_step_honest)[:len(cur_step_adversaries)])
+        #################################################################################################################################        
         
         for j, _ in enumerate(self.network.parameters()):
             tempt_grads = []
@@ -699,11 +871,177 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             FACTOR = 100
             for adv_index in dummpy_adversarial_nodes:
                 for k, v in self._coded_grads_buffer.items():
-                    if adv_index in self._group_list[k]:
-                        # _mal_grad = v
-                        # _mal_grad[mu > 0] = minimum[mu > 0] #- OFFSET*np.ones(np.shape(_mal_grad[mu > 0]))
-                        # _mal_grad[mu <= 0] = maximum[mu <= 0] #+ OFFSET*np.ones(np.shape(_mal_grad[mu > 0]))
-                        _mal_grad = -FACTOR*mu
-                        _relative_index_in_group = self._group_list[k].index(adv_index)
-                        assert self._coded_grads_buffer[k][_relative_index_in_group][j].shape == _mal_grad.shape
-                        self._coded_grads_buffer[k][_relative_index_in_group][j] = _mal_grad
+                    if self._err_choice == 'all':
+                        if adv_index in self._group_list[k]:
+                            # _mal_grad = v
+                            # _mal_grad[mu > 0] = minimum[mu > 0] #- OFFSET*np.ones(np.shape(_mal_grad[mu > 0]))
+                            # _mal_grad[mu <= 0] = maximum[mu <= 0] #+ OFFSET*np.ones(np.shape(_mal_grad[mu > 0]))
+                            _mal_grad = -FACTOR*mu
+                            _relative_index_in_group = self._group_list[k].index(adv_index)
+                            assert self._coded_grads_buffer[k][_relative_index_in_group][j].shape == _mal_grad.shape
+                            self._coded_grads_buffer[k][_relative_index_in_group][j] = _mal_grad
+                    elif self._err_choice == 'fixed_disagreement':
+                        # ~ Note: see comments in worker's code as it is almost same
+                        group = set(self._group_list[k])
+                        
+                        cur_group_adversaries = cur_step_adversaries & group
+                        
+                        cur_group_honest = group - cur_group_adversaries
+                        
+                        if adv_index in group and cur_group_honest.issubset(cur_step_D):
+                            # ~ same as above
+                            _mal_grad = -FACTOR*mu
+                            _relative_index_in_group = self._group_list[k].index(adv_index)
+                            assert self._coded_grads_buffer[k][_relative_index_in_group][j].shape == _mal_grad.shape
+                            self._coded_grads_buffer[k][_relative_index_in_group][j] = _mal_grad
+    
+    
+    # ~ Adversarial detection method    
+    def _attempt_detection(self):
+        K = self.num_workers
+        r = self._group_size
+        
+        # ~ Compute the number of joint files of a pair of workers (this is also the number of agreements we need to see in order to draw an edge on the detection graph)
+        # For some schemes this may need to be passed as an argument to the master
+        if self._approach == "subset":
+            # Subset assignment: each pair of workers participates into (K-2) choose (r-2) groups
+            pairGroups = ncr(K-2, r-2)
+            
+        # ~ test
+        # logger.info("DEBUG_PS_BYZ: K, r, pairGroups: {} {} {}".format(K, r, pairGroups))
+        # logger.info("DEBUG_PS_BYZ: Step: {}, self._group_list in _attempt_detection(): {}".format(self.cur_step, self._group_list))
+
+        # Counts the agreements of all worker pairs (x,y), i.e., ranks. WLOG, the records will have x < y since the agreement relation is undirected.
+        # collections.Counter() considers non-existent keys as zero, so if two workers (x,y) never agree, that won't be an issue
+        agreements = Counter()
+    
+        for file in self._group_list: # ~ for each file 0...f-1
+        
+            # ~ workers (ranks) that processed the file
+            group = self._group_list[file]
+            
+            for worker1, worker2 in product(group, group): # ~ for each pair of workers that processed the file
+                # ~ Determine whether pair agrees on all layer gradients for the file 
+                
+                # ~ If worker1, worker2 are the same worker go on. Also, since these agreements are bidirectional we don't want to double-count them, so we consider only worker1 < worker2
+                if worker1 == worker2 or worker1 > worker2: continue
+                
+                # ~ fetch the gradients for all layers for the current file of the current pair {worker1, worker2}
+                worker1_grad = self._coded_grads_buffer[file][group.index(worker1)]
+                worker2_grad = self._coded_grads_buffer[file][group.index(worker2)]
+                
+                agreement = True
+                
+                # ~ for each layer, check exact match
+                # torch.nn.Parameter does not support len()
+                for layer_idx, _ in enumerate(self.network.parameters()):
+                    if not np.array_equal(worker1_grad[layer_idx], worker2_grad[layer_idx]):
+                        agreement = False
+                        break
+                
+                # ~ sorting is used since agreement does not use direction, i.e., agreements[(x,y)] == agreements[(y,x)]     
+                if agreement: agreements[tuple([worker1, worker2])] += 1
+                
+        # ~ test
+        # logger.info("DEBUG_PS_BYZ: agreements: {}".format(agreements))
+                
+        # ~ Detection graph G, encodes the agreements of the workers
+        G = nx.Graph()
+        G.add_nodes_from(range(1, K+1))
+        
+        # ~ Draw graph edges based on agreements
+        for worker1 in range(1, K+1):
+            for worker2 in range(worker1+1, K+1):
+                if agreements[(worker1, worker2)] == pairGroups:
+                    G.add_edge(worker1, worker2)
+        
+        # ~ Compute all cliques in G         
+        C_vec = list(nx.clique.find_cliques(G))
+        
+        # ~ test
+        # logger.info("DEBUG_PS_BYZ: C_vec: {}".format(C_vec))
+        
+        # ~ Size of each (if more than one) maximum clique in G
+        cliqueNum = float('-inf')
+        
+        # ~ Identify all maximum cliques in G
+        self.maxCliques = set()
+        for C in C_vec:
+            if len(C) > cliqueNum:
+                cliqueNum = len(C)
+                self.maxCliques = {tuple(C)}
+            elif len(C) == cliqueNum:
+                self.maxCliques.add(tuple(C))
+                
+        # ~ test
+        logger.info("DEBUG_PS_BYZ: self.maxCliques: {}".format(self.maxCliques))
+        
+        # ~ The workers that will be ignored since they have been detected (if any)
+        self.detectedWorkers = set()
+        if len(self.maxCliques) == 1:
+            for C in self.maxCliques: break 
+            for worker in range(1, K+1):
+                if worker not in C:
+                    self.detectedWorkers.add(worker)
+                    
+            # ~ First, identify a non-distorted file gradient that will act as a placeholder gradient for all fully adversarial groups
+            cleanGradient = None
+            for file in self._group_list:
+                group = self._group_list[file]
+                for worker in group:
+                    if worker not in self.detectedWorkers:
+                        # ~ A non-adversary was found in the current group, store this gradient and break, don't look for another one.
+                        cleanGradient = self._coded_grads_buffer[file][group.index(worker)]
+                        break
+                
+                # ~ found a non-distorted gradient, break, don't look for another one.
+                if cleanGradient is not None: break
+                
+            # ~ test
+            # match the layer index with subsequent debugging code
+            # lay = 0 # ~ layer index (0-indexed)
+            # np.save('cleanGradient_layer'+str(lay), cleanGradient[lay])
+            
+            # ~ This needs to be reset at every iteration
+            self.fullyDistortedFiles = []
+            
+            # ~ Next, for each file (group):
+            # If the group is fully honest, don't change anything.
+            # If the group is fully adversarial, use the placeholder gradient for all participants. But, maybe the correct thing is to ignore this group (implemented after majority voting).
+            # If the group is mixed (some adversaries, some honest), substitute all adversarial gradients with an honest one within the group, do not use the placeholder here.
+            for file in self._group_list:
+                group = self._group_list[file]
+                groupSet = set(group)
+                if len(groupSet & self.detectedWorkers) == 0:
+                    # ~ Fully honest group
+                    continue
+                elif len(groupSet & self.detectedWorkers) == r:
+                    # ~ Fully adversarial group
+                    for worker in group:
+                        # ~ You must do a deep copy otherwise it will refer to the same memory location
+                        self._coded_grads_buffer[file][group.index(worker)] = copy.deepcopy(cleanGradient)
+                        
+                    # ~ test
+                    # logger.info("DEBUG_PS_BYZ: Fully adversarial file: {}".format(file))
+                    
+                    self.fullyDistortedFiles += [file]
+                    
+                else:
+                    # ~ Mixed group
+                    
+                    # ~ Identify an honest gradient within the group
+                    cleanGroupGradient = None
+                    for worker in group:
+                        if worker not in self.detectedWorkers:
+                            # A non-adversary was found in the current group, store this gradient and break, don't look for another one.
+                            cleanGroupGradient = self._coded_grads_buffer[file][group.index(worker)]
+                            break
+                    
+                    # ~ Use the honest gradient instead of all adversarial ones within a group
+                    for worker in group:
+                        if worker in self.detectedWorkers:
+                            # ~ You must do a deep copy otherwise it will refer to the same memory location
+                            self._coded_grads_buffer[file][group.index(worker)] = copy.deepcopy(cleanGroupGradient)
+            
+        # ~ test
+        logger.info("DEBUG_PS_BYZ: detectedWorkers: {}".format(self.detectedWorkers))

@@ -47,12 +47,18 @@ class ByzshieldWorker(DistributedWorker):
         
         self._update_mode = kwargs['update_mode']
         
-        # ~ test
-        # if self.rank == 1:
-            # logger.info("DEBUG_W_BYZ: ell: {}".format(self.ell))
+        self._err_choice = kwargs['err_choice'] # ~ if set to 'fixed_disagreement', the adversaries will only distort files of groups where all honest workers are in a fixed disagreement set. If set to 'all', the adversaries will distort all files.
+        
+        # ~ Ranks of all workers
+        self.all_workers = set(range(1, self.world_size))
         
         # ~ test
-        # logger.info("DEBUG_W_BYZ: seeds: {}".format(self.seeds))
+        # if self.rank == 1:
+            # logger.info("DEBUG_W_BYZ: self._group_list: {}".format(self._group_list))
+            # logger.info("DEBUG_W_BYZ: self._group_num: {}".format(self._group_num))
+            # logger.info("DEBUG_W_BYZ: self._group_seeds: {}".format(self._group_seeds))
+            # logger.info("DEBUG_W_BYZ: self.ell: {}".format(self.ell))
+            # logger.info("DEBUG_W_BYZ: self._err_choice: {}".format(self._err_choice))
 
     def build_model(self):
         # build network
@@ -171,7 +177,22 @@ class ByzshieldWorker(DistributedWorker):
                     first = False
                     # should_enter_next = False # ~ never used
                     logger.info("W_BYZ: Rank of this node: {}, Current step: {}".format(self.rank, self.cur_step))
-
+                    
+                    # ~ All adversaries (ranks) of current iteration, in general this set will be fixed
+                    cur_step_adversaries = set(self._fail_workers[self.cur_step])
+                    
+                    # ~ All non-adversaries (ranks) of current iteration, in general this set will be fixed
+                    cur_step_honest = self.all_workers - cur_step_adversaries
+                    
+                    # ~ Non-adversaries (ranks) of current iteration with whom adversaries will disagree, in general this set will be fixed
+                    # Recall that the q adversaries afford to disagree with at most q non-adversaries to evade detection
+                    # Sorting is needed to guarantee consistency among all adversaries (but may not be needed in Python)
+                    cur_step_D = set(sorted(cur_step_honest)[:len(cur_step_adversaries)])
+                    
+                    # ~ test
+                    if self.rank == 1:
+                        logger.info("DEBUG_W_BYZ: cur_step_{}_adversaries, cur_step_honest, cur_step_D: {} {} {}".format(self.cur_step, cur_step_adversaries, cur_step_honest, cur_step_D))
+                            
                     fetch_weight_start_time = time.time()
                     self.async_fetch_weights_bcast()
                     fetch_weight_duration = time.time() - fetch_weight_start_time
@@ -236,12 +257,45 @@ class ByzshieldWorker(DistributedWorker):
                         # ~ (list) the shape of these gradients depends on the network layers only, not on batchsize or other parameters, the length of the list is equal to the number of layers, see DEBUG below
                         file_grads = [p.grad.detach().numpy().astype(float_type) for p in self.network.parameters()]
                         
+                        # ~ ASPIS: If caller rank is adversarial, distort the current file if its group is fully adversarial or all its non-adversaries are in the disagreements set
+                        # Disabled if ALIE is enabled
+                        if self.rank in self._fail_workers[self.cur_step] and self._err_choice == 'fixed_disagreement' and self._lis_simulation != "simulate" and self._err_mode != "foe":
+                            
+                            # ~ test
+                            # logger.info("DEBUG_W_BYZ: FIXED DISAGREEMENT ATTACK")
+                            
+                            # ~ Group of workers (ranks) processing the current file
+                            group = set(self._group_list[fileInd])
+                            
+                            # ~ Set of adversaries in current group
+                            cur_group_adversaries = cur_step_adversaries & group
+                            
+                            # ~ Set of non-adversaries in current group
+                            cur_group_honest = group - cur_group_adversaries
+                            
+                            # ~ test
+                            # if self.rank == 1:
+                                # logger.info("DEBUG_W_BYZ: self._fail_workers[self.cur_step]: {} {}".format(self._fail_workers[self.cur_step], type(self._fail_workers[self.cur_step])))
+                                # logger.info("DEBUG_W_BYZ: A: {} {}".format(A, type(A)))
+                                # logger.info("DEBUG_W_BYZ: group: {} {}".format(group, type(group)))
+                                # logger.info("DEBUG_W_BYZ: group: {} {} {}".format(group, cur_group_adversaries, cur_group_honest))
+                                
+                            
+                            # ~ An adversary will decide to distort or not current file
+                            if cur_group_honest.issubset(cur_step_D):
+                                # ~ Either the group is fully adversarial (cur_group_honest == set()) or its non-adversaries are in the "disagreement set". The adversary chooses to distort.
+                                
+                                # ~ Distort all layers of the file
+                                for i in range(len(file_grads)):
+                                    # ~ The actual type of distortion will depend on "self._err_mode"
+                                    file_grads[i] = err_simulation(file_grads[i], self._err_mode)
+
                         # save_start_time = time.time() # ~ test
                         
                         # method 1: needs to be paired with method 1 above ...
                         # for i in range(len(grads)):
                             # grads[i] = np.append(grads[i], file_grads[i], axis = 0) # ~ np.append() is not in-place
-                          
+                        
                         # method 2 (fast due to pre-allocation): needs to be paired with method 2 above ...
                         for i, p in enumerate(self.network.parameters()):
                             grads[i][p.shape[0]*fileInd:p.shape[0]*(fileInd+1),...] = file_grads[i]
@@ -261,6 +315,11 @@ class ByzshieldWorker(DistributedWorker):
                             # ~ save gradient of current file for layer lay
                             # for lay in range(len(file_grads)):
                                 # np.save('worker'+str(self.rank)+'_grads_layer'+str(lay)+'_file'+str(file), file_grads[lay])
+                                
+                        # ~ test
+                        # lay = 0
+                        # if self.cur_step == 2:
+                            # np.save('worker'+str(self.rank)+'_grads_layer'+str(lay)+'_file'+str(file), file_grads[lay])
 
                         # ~ we still pick only the appropriate batch's labels & torch.long() converts to torch.int64
                         prec1, prec5 = accuracy(logits.detach(), train_label_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1)].long(), topk=(1, 5))
@@ -315,7 +374,8 @@ class ByzshieldWorker(DistributedWorker):
                     req_isend = self.comm.Isend([grad, MPI.DOUBLE], dest=0, tag=88+i)
                 req_send_check.append(req_isend)
             else:
-                if self.rank in self._fail_workers[self.cur_step]:
+                # ~ ASPIS: adversarial workers have already distorted some files in case of the 'fixed_disagreement' attack
+                if self.rank in self._fail_workers[self.cur_step] and self._err_choice == 'all':
                     simulation_grad = err_simulation(grad, self._err_mode)
                     if self._update_mode=="sign-sgd":
                         # signSGD worker side
