@@ -1,7 +1,7 @@
 # Aspis
-ByzShield's robust distributed ML framework implementation.
+Aspis's robust detection/aggregation ML framework implementation.
 
-This project builds on [ByzShield] and implements our proposed ByzShield algorithm for robust distributed deep learning. Our placement involves three different techniques, namely MOLS, Ramanujan Case 1 & Ramanujan Case 2. It also includes three different types of attack on the DETOX framework.
+This project builds on [ByzShield] and implements the detection and subsequent aggregation of our proposed Aspis algorithm for robust distributed machine learning. The gradients are assigned to the workers using a subset assignment. We test against the most sophisticated attacks in an omniscient scenario and compare with competing methods.
 
 # Requirements
 We will be working with Python 2 for the local machine (to execute the bash scripts which configure the remote cluster and initiate training/testing) and with Python 3 for the remote cluster of PS/worker nodes (to execute the actual training/testing). We recommend using an Anaconda (tested with 2020.02) environment in both cases. The local machine would typically be a Linux system (tested with Ubuntu). Below, we have reported the exact version of each module that worked for us, however your mileage may vary.
@@ -17,7 +17,7 @@ The first steps we need to do before installing the required packages are
 | ------ | ------ | ------ | ------ |
 | All traffic | All | 0-65535 | Anywhere |
 
-Create a security group ([instructions][security_group_create]) with the above settings and give it a name, e.g., `byzshield_security_group`. We will also use it later.
+Create a security group ([instructions][security_group_create]) with the above settings and give it a name, e.g., `aspis_security_group`. We will also use it later.
 
 ## Prerequisites/Anaconda installation (both local and remote)
 ```sh
@@ -61,8 +61,8 @@ The tested dependencies versions for the local/remote machines are given next:
 
 The exact series of commands for the *local* machine is
 ```sh
-conda create -n byzshield_local_python2 python=2.7
-conda activate byzshield_local_python2
+conda create -n aspis_local_python2 python=2.7
+conda activate aspis_local_python2
 conda install pip
 python -m pip install --upgrade pip
 pip install --upgrade setuptools
@@ -74,8 +74,8 @@ conda install -y -c anaconda boto3
 
 The exact series of commands for the *remote* machine is
 ```sh
-conda create -n byzshield python=3.7
-conda activate byzshield
+conda create -n aspis python=3.7
+conda activate aspis
 conda install pip
 python -m pip install --upgrade pip
 pip install --upgrade setuptools
@@ -125,7 +125,7 @@ cfg = Cfg({
     "path_to_keyfile" : "{Your AWS private key file with the .pem extenion, like xxxxxx.pem}",                   # string
     "nfs_ip_address" : "{IP address of the EFS xxx.xxx.xxx.xxx}",                                                # string
     "nfs_mount_point" : "{Path to EFS folder named "shared", set to /home/ubuntu/shared}",                       # string
-    "security_group": ["{Name of the AWS security group, mentioned before as byzshield_security_group}"],        # string
+    "security_group": ["{Name of the AWS security group, mentioned before as aspis_security_group}"],        # string
 })
 ```
 **Note**: The data sets will be downloaded from the PS to the EFS folder and then fetched from all machines from there. For this to work, the EFS folder needs to be named `shared` and located at the home directory `~`. Since `~` is same as `/home/ubuntu` for AWS Ubuntu instances, you need to set the EFS folder above to be `~/shared` or `/home/ubuntu/shared`.
@@ -137,9 +137,9 @@ Next, use the chmod command to make sure your private key file isn't publicly vi
 chmod 400 {xxxxxx}.pem
 ```
 
-Now, from the local machine and the Python 2 envirnoment `byzshield_local_python2`, launch replicas of the AMI (those will be the PS and worker instances) running the following:
+Now, from the local machine and the Python 2 envirnoment `aspis_local_python2`, launch replicas of the AMI (those will be the PS and worker instances) running the following:
 ```sh
-conda activate byzshield_local_python2
+conda activate aspis_local_python2
 python ./tools/pytorch_ec2.py launch
 ```
 
@@ -161,11 +161,11 @@ ssh -i  {Your AWS private key file with the .pem extenion} ubuntu@{private IP of
 ## Data set and worker preparation
 On the PS, download, split and normalize the MNIST/Cifar10/SVHN/Cifar100 data sets:
 ```sh
-conda activate byzshield && bash ./src/data_prepare.sh
+conda activate aspis && bash ./src/data_prepare.sh
 ```
 **Note**: This requires `sudo` permissions to save data sets to the EFS folder. Since `sudo` uses a different path than your typical environment, you need to specify that you want to use the Anaconda Python 3 environment we created before rather than the system `python`. To do that make sure that `data_prepare.sh` points to that environment
 ```sh
-sudo {Path to Anaconda "python" file, e.g., /home/ubuntu/anaconda3/envs/byzshield/bin/python} ./datasets/data_prepare.py
+sudo {Path to Anaconda "python" file, e.g., /home/ubuntu/anaconda3/envs/aspis/bin/python} ./datasets/data_prepare.py
 ```
 
 On the PS, run the `remote_script.sh` to configure the SSH and copy the project files and data sets to the workers:
@@ -184,7 +184,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `momentum` | Value of momentum. |
 | `network` | Deep neural net: `LeNet`,`ResNet18`,`ResNet34`,`ResNet50`,`DenseNet`,`VGG11` or `VGG13`. |
 | `dataset` | Data set: `MNIST`, `Cifar10`, `SVHN` or `Cifar100`. |
-| `batch-size` | Batchsize: equal to b in ByzShield, equal to br/K in DETOX, equal to b/K in vanilla batch-SGD (baseline). |
+| `batch-size` | Batchsize: equal to b in Aspis, equal to br/K in DETOX, equal to b/K in vanilla batch-SGD (baseline). |
 | `mode` | Robust aggregation method: `coord-median`, `bulyan`, `multi-krum`, `sign-sgd` or `geometric_median` (only supported in baseline). |
 | `adversarial-detection` | Method used to detect and potentially exclude adversaries: `clique` (if a unique maximum clique of size K-q exists all other workers will be ignored). The surviving gradients must be aggregated with a `mode=coord-median` aggregator. If set to anything else, no detection will take place.  |
 | `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (proposed MOLS), `rama_one` (proposed Ramanujan Case 1), `rama_two` (proposed Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`. |
