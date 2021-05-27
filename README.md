@@ -226,7 +226,7 @@ The basic arguments of this script along with all possible values are below.
 
 
 [DETOX]: <https://github.com/hwang595/DETOX>
-[DETOX]: <https://github.com/kkonstantinidis/ByzShield>
+[ByzShield]: <https://github.com/kkonstantinidis/ByzShield>
 [Install]: <https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html>
 [configure]: <https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html>
 [Launch]: <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/launching-instance.html>
