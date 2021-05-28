@@ -2,7 +2,7 @@
 PROJECT_INDEX="$1"
 
 # to be run by PS
-KEY_PEM_NAME=virginiakey.pem
+KEY_PEM_NAME=key.pem
 export DEEPLEARNING_WORKERS_COUNT=`wc -l < hosts`
 
 # ~ run a command as the substitute user without starting an interactive shells

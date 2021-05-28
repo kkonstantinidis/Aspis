@@ -1,7 +1,7 @@
 # ~ copies code and some other files to PS
 # $1: public IP of PS
-KEY_PEM_DIR=virginiakey.pem
-KEY_PEM_NAME=virginiakey.pem # ~ never used
+KEY_PEM_DIR=key.pem
+KEY_PEM_NAME=key.pem # ~ never used
 PUB_IP_ADDR="$1"
 PROJECT_INDEX="$2"
 echo "Public address of master node: ${PUB_IP_ADDR}"

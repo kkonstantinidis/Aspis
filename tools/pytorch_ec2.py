@@ -21,7 +21,7 @@ class Cfg(dict):
 
 cfg = Cfg({
     "name" : "Timeout",      # Unique name for this specific configuration
-    "key_name": "virginiakey",          # ~ Necessary to ssh into created instances, WITHOUT .pem
+    "key_name": "key",          # ~ Necessary to ssh into created instances, WITHOUT .pem
     # Cluster topology
     "n_masters" : 1,                      # Should always be 1
     "n_workers" : 3,
@@ -39,7 +39,7 @@ cfg = Cfg({
     "spot_price" : "5",                 # Has to be a string
     # SSH configuration
     "ssh_username" : "ubuntu",            # For sshing. E.G: ssh ssh_username@hostname
-    "path_to_keyfile" : "virginiakey.pem", # ~ be careful with this path since the execution path depends on where you run the code from
+    "path_to_keyfile" : "key.pem", # ~ be careful with this path since the execution path depends on where you run the code from
 
     # NFS configuration
     # To set up these values, go to Services > Elastic File System > Create file system, and follow the directions.

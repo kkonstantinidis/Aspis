@@ -1,5 +1,5 @@
 # ~ probably useless, does the same as kill_all_python() in pytorch_ec2.py
-KEY_PEM_NAME=${HOME}/.ssh/virginiakey.pem
+KEY_PEM_NAME=${HOME}/.ssh/key.pem
 
 # ~ counts no. of lines in files
 export DEEPLEARNING_WORKERS_COUNT=`wc -l < hosts`
