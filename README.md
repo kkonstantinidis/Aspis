@@ -187,7 +187,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `batch-size` | Batchsize: equal to b in Aspis, equal to br/K in DETOX, equal to b/K in vanilla batch-SGD (baseline). |
 | `mode` | Robust aggregation method: `coord-median`, `bulyan`, `multi-krum`, `sign-sgd` or `geometric_median` (only supported in baseline). |
 | `adversarial-detection` | Method used to detect and potentially exclude adversaries: `clique` (if a unique maximum clique of size K-q exists all other workers will be ignored). The surviving gradients must be aggregated with a `mode=coord-median` aggregator. If set to anything else, no detection will take place.  |
-| `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (proposed MOLS), `rama_one` (proposed Ramanujan Case 1), `rama_two` (proposed Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`. |
+| `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (ByzShield MOLS), `rama_one` (ByzShield Ramanujan Case 1), `rama_two` (ByzShield Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`, `subset` (proposed Aspis assignment). |
 | `eval-freq` | Frequency of iterations to backup trained model (for evaluation). |
 | `err-mode` | Byzantine attack to simulate: `rev_grad` (reversed gradient) or `constant` (constant gradient) or `foe` ("Fall of Empires"), refer to `src/model_ops/util.py` for details. |
 | `err-choice` | How adversaries choose which files to distort: `fixed_disagreement` (all q adversaries disagree with a fixed set of honest workers), `all` to distort all files. This will also work with ALIE and "Fall of Empires". |
