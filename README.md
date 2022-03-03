@@ -186,8 +186,8 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `dataset` | Data set: `MNIST`, `Cifar10`, `SVHN` or `Cifar100`. |
 | `batch-size` | Batchsize: equal to b in Aspis, equal to br/K in DETOX, equal to b/K in vanilla batch-SGD (baseline). |
 | `mode` | Robust aggregation method: `coord-median`, `bulyan`, `multi-krum`, `sign-sgd` or `geometric_median` (only supported in baseline). |
-| `adversarial-detection` | Method used to detect and potentially exclude adversaries: `clique` (if a unique maximum clique of size K-q exists all other workers will be ignored). The surviving gradients must be aggregated with a `mode=coord-median` aggregator. If set to anything else, no detection will take place.  |
-| `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (ByzShield MOLS), `rama_one` (ByzShield Ramanujan Case 1), `rama_two` (ByzShield Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`, `subset` (proposed Aspis assignment). |
+| `adversarial-detection` | Method used to detect and potentially exclude adversaries: `clique` (look for a unique maximum clique of size K-q), `degree` (look for workers with degree less than K-q-1). The surviving gradients must be aggregated with a `mode=coord-median` aggregator. If set to anything else, no detection will take place.  |
+| `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (ByzShield MOLS), `rama_one` (ByzShield Ramanujan Case 1), `rama_two` (ByzShield Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`, `subset` (proposed Aspis assignment), `cyclic_c3les` (Cyclic code in the C3LES paper (Figure 3)), `hard_coded` (Hard-coded assignment defined in `util.py`) |
 | `eval-freq` | Frequency of iterations to backup trained model (for evaluation). |
 | `err-mode` | Byzantine attack to simulate: `rev_grad` (reversed gradient) or `constant` (constant gradient) or `foe` ("Fall of Empires"), refer to `src/model_ops/util.py` for details. |
 | `err-choice` | How adversaries choose which files to distort: `fixed_disagreement` (all q adversaries disagree with a fixed set of honest workers), `all` to distort all files. This will also work with ALIE and "Fall of Empires". |
@@ -202,7 +202,22 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `detox-attack` | Our attack on DETOX (see `--approach`): `worst` (optimally attacks majority within groups), `benign` or `whole_group`.  |
 | `byzantine-gen` | Type of byzantine set generation (`random` (random for each iteration) or `hard_coded` (fixed for all iterations and set in `util.py`)). This won't affect `draco_lite_attack` or `detox_attack`.|
 | `gamma` | Learning rate decay (linear). |
-| `lr-step` | Frequency of learning rate decay (measured in number of iterations). |
+| `lr-step` | Frequency of learning rate decay (measured in number of iterations). Applies only if `lr-warmup=no` (see below). |
+| `max-grad-l2norm` | 0 (disabled) or > 0 (enabled). If > 0, it is the maximum L-2 norm of the final gradient that the PS will clip to for the global model update at the end of each iteration. |
+| `cyclic-ell` | Computation load per worker for the cyclic code in the C3LES paper (Figure 3). |
+| `pair-groups` | Number of joint files of each pair of workers. Applies only if `approach=hard_coded`. |
+
+### Learning rate scheduling
+This functionality has been added to incorporate ideas from the paper *Stochastic Training is Not Necessary for Generalization, Geiping et al., 2021*. The following arguments work only if `approach` is one of the following: `mols`, `rama_one`, `rama_two`, `subset`, `cyclic_c3les` or `hard_coded`, i.e., when the utilized PS is `byzshield_master.py`. Do not use it with other `approach`es. The method supports learning rate warmup followed by cosine annealing (only warmup or both of them are supposed to be activated, do not enable only the annealing).
+
+| Argument                      | Values/description                                 |
+| ----------------------------- | ---------------------------------------- |
+| `lr-warmup` | `yes` or `no`. If `yes`, it warms up the learning rate starting from `(1/maxlr-steps)*maxlr` going until `maxlr` until the step indexed with `maxlr-steps`, in small increments. |
+| `maxlr` | If `lr-warmup=yes`, this is the maximum learning rate to warm up to. Also, if `lr-annealing=yes`, this is also the maximum value of the cosine wave for the learning rate. |
+| `maxlr-steps` | See `lr-warmup`. |
+| `lr-annealing` | `yes` or `no`. If `yes`, it does cosine annealing to the learning rate between the values `lr-annealing-minlr` and `maxlr`. The period of the cosine wave is `lr-annealing-cycle-steps`. Cosine annealing starts the learning rate warmup, so do not enable it if `lr-warmup=no`. |
+| `lr-annealing-minlr` | See `lr-annealing`. |
+| `lr-annealing-cycle-steps` | See `lr-annealing`. |
 
 To initiate training, from the PS run:
 ```sh
