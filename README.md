@@ -205,7 +205,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `lr-step` | Frequency of learning rate decay (measured in number of iterations). Applies only if `lr-warmup=no` (see below). |
 | `max-grad-l2norm` | 0 (disabled) or > 0 (enabled). If > 0, it is the maximum L-2 norm of the final gradient that the PS will clip to for the global model update at the end of each iteration. |
 | `cyclic-ell` | Computation load per worker for the cyclic code in the C3LES paper (Figure 3). |
-| `pair-groups` | Number of joint files of each pair of workers. Applies only if `approach=hard_coded`. |
+| `pair-groups` | Number of joint files of each pair of workers. This is required only if *(`adversarial-detection=clique` and `approach!=subset`) or `adversarial-detection=degree`*. It is mostly useful for `approach=hard_coded`. |
 
 ### Learning rate scheduling
 This functionality has been added to incorporate ideas from the paper *Stochastic Training is Not Necessary for Generalization, Geiping et al., 2021*. The following arguments work only if `approach` is one of the following: `mols`, `rama_one`, `rama_two`, `subset`, `cyclic_c3les` or `hard_coded`, i.e., when the utilized PS is `byzshield_master.py`. Do not use it with other `approach`es. The method supports learning rate warmup followed by cosine annealing (only warmup or both of them are supposed to be activated, do not enable only the annealing).
