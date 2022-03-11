@@ -204,7 +204,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `gamma` | Learning rate decay (linear). |
 | `lr-step` | Frequency of learning rate decay (measured in number of iterations). Applies only if `lr-warmup=no` (see below). |
 | `max-grad-l2norm` | 0 (disabled) or > 0 (enabled). If > 0, it is the maximum L-2 norm of the final gradient that the PS will clip to for the global model update at the end of each iteration. |
-| `cyclic-ell` | Computation load per worker for the cyclic code in the C3LES paper (Figure 3). |
+| `cyclic-ell` | If `approach=cyclic_c3les`, it is the computation load per worker for the cyclic code in the C3LES paper (Figure 3). |
 | `pair-groups` | Number of joint files of each pair of workers. This is required only if *(`adversarial-detection=clique` and `approach!=subset`) or `adversarial-detection=degree`*. It is mostly useful for `approach=hard_coded`. |
 | `adv-win-length` | How often to pick a new set of adversaries (in # of iterations); only needed if `byzantine-gen=random_window`. |
 | `det-win-length` | How often to reset the agreements counter for detection at the PS level (in # of iterations); only needed if `adversarial-detection=degree`. |
