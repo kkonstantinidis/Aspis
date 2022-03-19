@@ -186,7 +186,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `dataset` | Data set: `MNIST`, `Cifar10`, `SVHN` or `Cifar100`. |
 | `batch-size` | Batchsize: equal to b in Aspis, equal to br/K in DETOX, equal to b/K in vanilla batch-SGD (baseline). |
 | `mode` | Robust aggregation method: `coord-median`, `bulyan`, `multi-krum`, `sign-sgd` or `geometric_median` (only supported in baseline). |
-| `adversarial-detection` | Method used to detect and potentially exclude adversaries: `clique` (look for a unique maximum clique of size K-q), `degree` (look for workers with degree less than K-q-1 - TO BE IMPLEMENTED). The surviving gradients must be aggregated with a `mode=coord-median` aggregator. If set to anything else, no detection will take place.  |
+| `adversarial-detection` | Method used to detect and potentially exclude adversaries: `clique` (look for a unique maximum clique of size K-q), `degree` (look for workers with degree less than K-q-1). The surviving gradients must be aggregated with a `mode=coord-median` aggregator. If set to anything else, no detection will take place.  |
 | `approach` | Distributed learning scheme `baseline` (vanilla), `mols` (ByzShield MOLS), `rama_one` (ByzShield Ramanujan Case 1), `rama_two` (ByzShield Ramanujan Case 2), `draco-lite` (DETOX), `draco_lite_attack` (our attack on DETOX), `maj_vote`, `subset` (proposed Aspis assignment), `cyclic_c3les` (Cyclic code in the C3LES paper (Figure 3)), `hard_coded` (Hard-coded assignment defined in `util.py`) |
 | `eval-freq` | Frequency of iterations to backup trained model (for evaluation). |
 | `err-mode` | Byzantine attack to simulate: `rev_grad` (reversed gradient) or `constant` (constant gradient) or `foe` ("Fall of Empires"), refer to `src/model_ops/util.py` for details. |
@@ -208,6 +208,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `pair-groups` | Number of joint files of each pair of workers. This is required only if *(`adversarial-detection=clique` and `approach!=subset`) or `adversarial-detection=degree`*. It is mostly useful for `approach=hard_coded`. |
 | `adv-win-length` | How often to pick a new set of adversaries (in # of iterations); only needed if `byzantine-gen=random_window`. |
 | `det-win-length` | How often to reset the agreements counter for detection at the PS level (in # of iterations); only needed if `adversarial-detection=degree`. |
+| `permute-files` | `yes` or `no`. If `yes`, it will randomly permute the file assignment after each iteration (adversarial indices won't change). It works only if `approach` is one of the following: `mols`, `rama_one`, `rama_two`, `subset`, `cyclic_c3les` or `hard_coded`. |
 
 ### Learning rate scheduling
 This functionality has been added to incorporate ideas from the paper *Stochastic Training is Not Necessary for Generalization, Geiping et al., 2021*. The following arguments work only if `approach` is one of the following: `mols`, `rama_one`, `rama_two`, `subset`, `cyclic_c3les` or `hard_coded`, i.e., when the utilized PS is `byzshield_master.py`. Do not use it with other `approach`es. The method supports learning rate warmup followed by cosine annealing (only warmup or both of them are supposed to be activated, do not enable only the annealing).
