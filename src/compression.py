@@ -35,7 +35,7 @@ def g_decompress(msg):
 
 def w_compress(w):
     assert isinstance(w, np.ndarray)
-    packed_msg = blosc.pack_array(w, cname='snappy')
+    packed_msg = blosc.pack_array(w, cname='blosclz')
     return packed_msg
 
 def w_decompress(msg):

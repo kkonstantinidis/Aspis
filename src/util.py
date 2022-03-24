@@ -68,6 +68,15 @@ hard_byz_set = {
                 6:np.array([1,2,6,8,12,13]),
                 7:np.array([1,2,3,6,8,11,12]),
                 8:np.array([1,2,3,4,5,6,7,8])}, # ~ use q >= 8 just for debugging
+                
+                # K=20, l=(19 choose 2)=171, r=3, Subset assignment, one worst-case Byzantine sets for some values of q but for this scheme you can choose anything you want
+                20: {i:np.array([j+1 for j in range(i)]) for i in range(10)},
+                
+                # K=21, l=(20 choose 2)=190, r=3, Subset assignment, one worst-case Byzantine sets for some values of q but for this scheme you can choose anything you want
+                21: {i:np.array([j+1 for j in range(i)]) for i in range(11)},
+
+                # K=24, l=(24 choose 2)=276, r=3, Subset assignment, one worst-case Byzantine sets for some values of q but for this scheme you can choose anything you want
+                24: {i:np.array([j+1 for j in range(i)]) for i in range(12)},
             
                 # K=35, l=7, r=5, MOLS/Rama Case 1, worst-case Byzantine sets for some values of q
                 35: {0:np.array([]),
@@ -430,7 +439,7 @@ def mols_groups(args, K, rank): # K == no. of workers
 # Arguments:
 # args: arguments to pull r from
 # K: no. of workers
-# rank: MPI rank of caller worker in {1,...,K}
+# rank: MPI rank of caller worker in {1,...,K} or PS (0)
 # Returns:
 # ret_group_dict: dictionary from file in {0,...,f-1} to list of workers (ranks) that have it
 # seeds_dict[rank] (returned to worker) OR seeds_dict (returned to PS): 
@@ -446,6 +455,50 @@ def subset_groups(args, K, rank): # K == no. of workers
         ret_group_dict[i] = list(f)
         for curWorker in f:
             seeds_dict[curWorker].append(i)
+                        
+    if rank == 0: # PS needs to know both file -> worker and worker -> file assignment to collect and aggregate the gradients
+        return ret_group_dict, seeds_dict, [0]*len(ret_group_dict)
+    else: # worker
+        return ret_group_dict, seeds_dict[rank], list(ret_group_dict.keys())
+        
+
+# ~ Decides file assignment for cyclic code in the C3LES paper, Figure 3.
+# The files are indexed as 0,1,...
+# Arguments:
+# args: arguments to pull cyclic_ell from, where:
+#   cyclic_ell: files per worker for the cyclic code, e.g., for cyclic_ell = 2 the first files for each worker will be
+#   0,1,...,K-2,K-1
+#   and the second file for each worker will be
+#   1,2,...,K-1,0
+# K: no. of workers
+# rank: MPI rank of caller worker in {1,...,K} or PS (0)
+# Returns:
+# ret_group_dict: dictionary from file in {0,...,f-1} to list of workers (ranks) that have it
+# seeds_dict[rank] (returned to worker) OR seeds_dict (returned to PS): 
+#     seeds_dict[rank]: list of files for caller worker (rank)
+#     seeds_dict: dictionary from worker (ranks) to list of files in {0,...,f-1} that it has
+# ret_group_dict.keys(): list of distinct files 0...f-1
+from itertools import combinations
+def cyclic_c3les_groups(args, K, rank): # K == no. of workers 
+    cyclic_ell = args.cyclic_ell # Size of each subset, to be used in AWS code
+    
+    ret_group_dict = {x:[] for x in range(0,K)} # list of workers (ranks) for each file
+    seeds_dict = {x:[] for x in range(1,K+1)} # list of files for each worker (rank)
+    
+    # Cyclic code offset for current row, see C3LES paper, Figure 3
+    offset = 0
+    
+    for i in range(cyclic_ell): # for each row of the cyclic code, see C3LES paper, Figure 3
+        for j in range(K): # for each worker
+            curFile = (j+offset)%K
+            curWorker = j+1
+            
+            print(curFile, curWorker)
+            
+            ret_group_dict[curFile].append(curWorker)
+            seeds_dict[curWorker].append(curFile)
+        
+        offset += 1
                         
     if rank == 0: # PS needs to know both file -> worker and worker -> file assignment to collect and aggregate the gradients
         return ret_group_dict, seeds_dict, [0]*len(ret_group_dict)
@@ -549,7 +602,25 @@ def epoch_seeds(num_epochs):
 
 
 def prepare(args, rank, world_size):
-    device = torch.device("cpu")
+    if args.no_cuda == "yes":
+        device = torch.device("cpu")
+    elif args.no_cuda == "no":
+        # ~ Try to use CUDA, if available
+        if torch.cuda.is_available():
+            # if torch.cuda.device_count() > 1:
+                # # ~ Use 2nd GPU
+                # device = torch.device("cuda:1")
+            # else:
+                # # ~ Use 1st GPU
+                # device = torch.device("cuda:0")
+                
+            device = torch.device("cuda:0")
+        else:
+            device = torch.device("cpu")
+        
+    else:
+        assert 0 == 1, "Error: Unknown choice for --no-cuda!"
+    
     if args.approach == "baseline":
         # randomly select adversarial nodes
         adversaries = _generate_adversarial_nodes(args, world_size)
@@ -717,7 +788,7 @@ def prepare(args, rank, world_size):
                     # }
         
     # ~ draco lite & all other Kostas cases
-    elif args.approach == "draco_lite" or args.approach == "draco_lite_attack" or args.approach == "mols" or args.approach == "rama_one" or args.approach == "rama_two" or args.approach == "subset":
+    elif args.approach == "draco_lite" or args.approach == "draco_lite_attack" or args.approach == "mols" or args.approach == "rama_one" or args.approach == "rama_two" or args.approach == "subset" or args.approach == "cyclic_c3les":
         seeds = epoch_seeds(args.epochs) # ~ won't be used by DETOX, only by ByzShield
         if args.approach == "draco_lite":
             adversaries = _generate_adversarial_nodes(args, world_size) # ~ chooses the adversaries at the beginning of training randomly or from a predefined list
@@ -761,6 +832,13 @@ def prepare(args, rank, world_size):
             c_q_max[world_size-1] = {} # needed for dictionary initialization
             c_q_max[world_size-1][args.worker_fail] = ncr(2*args.worker_fail, args.group_size)//2
             
+        elif args.approach == "cyclic_c3les": # ~ Cyclic code in the C3LES paper, Figure 3
+            adversaries = _generate_adversarial_nodes(args, world_size)
+            group_list, group_num, group_seeds=cyclic_c3les_groups(args, world_size-1, rank)
+            
+            # ~ arbitrary 1st seed (file) to torch (won't be used)
+            train_loader, training_set, test_loader = load_data(dataset=args.dataset, seed=42, args=args, rank=rank)
+            
         # ~ this is the same for all of the above cases
         kwargs_master = {
                     'batch_size':args.batch_size, 
@@ -782,13 +860,20 @@ def prepare(args, rank, world_size):
                     'worker_fail':args.worker_fail,
                     'device':device,
                     'adversaries':adversaries,
-                    'c_q_max':c_q_max[world_size-1][args.worker_fail], # ~ won't be used by DETOX, only by ByzShield
+                    'c_q_max':c_q_max[world_size-1][args.worker_fail] if args.approach in {"mols", "rama_one", "rama_two", "subset"} else None, # ~ won't be used by DETOX, only by ByzShield or Aspis
                     'gamma':args.gamma,
                     'lr_step':args.lr_step,
                     'err_mode':args.err_mode,
                     'adversarial_detection':args.adversarial_detection, # ~ won't be used by DETOX, only by ByzShield (Aspis)
                     'approach':args.approach, # ~ won't be used by DETOX, only by ByzShield (Aspis)
-                    'err_choice':args.err_choice # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'err_choice':args.err_choice, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'lr_warmup':args.lr_warmup, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'maxlr':args.maxlr, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'maxlr_steps':args.maxlr_steps, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'lr_annealing':args.lr_annealing, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'lr_annealing_minlr':args.lr_annealing_minlr, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'lr_annealing_cycle_steps':args.lr_annealing_cycle_steps, # ~ won't be used by DETOX, only by ByzShield (Aspis)
+                    'max_grad_l2norm':args.max_grad_l2norm # ~ won't be used by DETOX, only by ByzShield (Aspis)
                     }
         kwargs_worker = {
                     'update_mode':args.mode,  # for implementing signSGD

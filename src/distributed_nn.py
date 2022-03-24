@@ -50,8 +50,8 @@ def add_fit_args(parser):
                         help='learning rate (default: 0.01)')
     parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
                         help='SGD momentum (default: 0.5)')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training') # ~ default value is used, never used
+    parser.add_argument('--no-cuda', type=str, default="yes", metavar='N',
+                        help='disables CUDA training')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)') # ~ default value is used, used only by cyclic
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
@@ -105,6 +105,24 @@ def add_fit_args(parser):
                         help='Logic according to which adversaries choose which files to distort')
     parser.add_argument('--adversarial-detection', type=str, default='nope', metavar='N',
                         help='Detection mechanism used by the PS to detect adversaries')
+    parser.add_argument('--lr-warmup', type=str, default="no", metavar='N',
+                        help='Whether to warm up learning rate from 0 to a value')
+    parser.add_argument('--maxlr', type=float, default=0.4, metavar='N',
+                        help='Max learning rate to reach at the end of warmup and/or the start of cosine annealing')
+    parser.add_argument('--maxlr-steps', type=int, default=0, metavar='N',
+                        help='Steps to reach max learning rate (end of warmup and/or the start of cosine annealing)')
+    parser.add_argument('--lr-annealing', type=str, default="no", metavar='N',
+                        help='Whether to use cosine annealing for the learning rate after warmup')
+    parser.add_argument('--lr-annealing-minlr', type=float, default=0.1, metavar='N',
+                        help='Min learning rate to reach when cosine annealing is used')
+    parser.add_argument('--lr-annealing-cycle-steps', type=int, default=4000, metavar='N',
+                        help='Number of steps in each cycle of cosine annealing (frequency of restarts to maximum learning rate)')
+    parser.add_argument('--max-grad-l2norm', type=float, default=0, metavar='N',
+                        help='Max L-2 norm for gradient clipping (set to 0 to disable)')
+    parser.add_argument('--cyclic-ell', type=int, default=1, metavar='N',
+                        help='Computation load per worker for the cyclic code in the C3LES paper, Figure 3')
+                        
+                        
     args = parser.parse_args()
     return args
 
@@ -224,7 +242,7 @@ if __name__ == "__main__": # ~ PS and workers will call this
             logger.info("I am worker: {} in all {} workers, next step: {}".format(coded_worker.rank, coded_worker.world_size-1, coded_worker.next_step))
             coded_worker.train(train_loader=train_loader, test_loader=test_loader)
             logger.info("Now the next step is: {}".format(coded_worker.next_step))  
-    elif args.approach == "mols" or args.approach == "rama_one" or args.approach == "rama_two" or args.approach == "subset": # ~ MOLS, Ramanujan Case 1, Ramanujan Case 2, Subset assignment
+    elif args.approach == "mols" or args.approach == "rama_one" or args.approach == "rama_two" or args.approach == "subset" or args.approach == "cyclic_c3les": # ~ MOLS, Ramanujan Case 1, Ramanujan Case 2, Subset assignment, Cyclic code in the C3LES paper, Figure 3
         train_loader, _, test_loader = datum
         if rank == 0:
             coded_master = byzshield_master.ByzshieldMaster(comm=comm, **kwargs_master) # ~ util.py is importing this

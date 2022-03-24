@@ -150,9 +150,9 @@ class DistributedWorker(NN_Trainer):
                     self._send_grads(grads)
                     c_duration = time.time() - c_start
 
-                    logger.info('W_BASELINE: Worker: {}, Step: {}, Epoch: {} [{}/{} ({:.0f}%)], Loss: {:.4f}, Time Cost: {:.4f}, Comp: {:.4f}, Comm: {:.4f}, Prec@1: {}, Prec@5: {}'.format(self.rank,
+                    logger.info('W_BASELINE: Worker: {}, Step: {}, Epoch: {} [{}/{} ({:.0f}%)], Loss: {:.4f}, Time Cost: {:.4f}, Comp: {:.4f}, Comm: {:.4f} + {:.4f}, Prec@1: {}, Prec@5: {}'.format(self.rank,
                          self.cur_step, num_epoch, batch_idx * self.batch_size, len(train_loader.dataset), 
-                            (100. * (batch_idx * self.batch_size) / len(train_loader.dataset)), loss.item(), time.time()-iter_start_time, computation_time, c_duration+fetch_weight_duration, prec1.numpy()[0], prec5.numpy()[0]))
+                            (100. * (batch_idx * self.batch_size) / len(train_loader.dataset)), loss.item(), time.time()-iter_start_time, computation_time, fetch_weight_duration, c_duration, prec1.numpy()[0], prec5.numpy()[0]))
                     
                     if self.cur_step%self._eval_freq == 0 and self.rank==1:
                         #self._save_model(file_path=self._generate_model_path())

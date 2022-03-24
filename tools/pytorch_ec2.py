@@ -24,7 +24,7 @@ cfg = Cfg({
     "key_name": "key",          # ~ Necessary to ssh into created instances, WITHOUT .pem
     # Cluster topology
     "n_masters" : 1,                      # Should always be 1
-    "n_workers" : 3,
+    "n_workers" : 1,
     "num_replicas_to_aggregate" : "8", # deprecated, not necessary
     "method" : "spot",
     # Region speficiation
@@ -188,7 +188,7 @@ def mxnet_ec2_run(argv, configuration):
             "Placement" : {"AvailabilityZone":configuration["availability_zone"]},
             "SecurityGroups": configuration["security_group"]}
             if method == "spot":
-                client.request_spot_instances(InstanceCount=count, LaunchSpecification=launch_specs, SpotPrice=configuration["spot_price"])
+                client.request_spot_instances(InstanceCount=count, LaunchSpecification=launch_specs, SpotPrice=configuration["spot_price"], LaunchGroup="dl_group")
             elif method == "reserved":
                 client.run_instances(ImageId=launch_specs["ImageId"],
                 MinCount=count,
@@ -669,7 +669,10 @@ def mxnet_ec2_run(argv, configuration):
 
 
     # ~ similar to run_mxnet_grid_search(), read comments there
-    # saves machine (PS and workers) hostnames in 3 formats: "{IP} \t deeplearning-worker{COUNTER}", alias, private IP 
+    # saves machine (PS and workers) hostnames in 3 formats: "{IP} \t deeplearning-worker{COUNTER}", alias and private IP.
+    # The 1st format will be stored in "hosts" file and will be used by remote_script.sh, will also be appended to /etc/hosts
+    # The 2nd format ...
+    # The 3rd format will be stored in "hosts_address" file (private IPs) will be used by mpirun
     def get_hosts(argv, port=22):
         # Check idle instances satisfy configs
         check_idle_instances_satisfy_configuration()

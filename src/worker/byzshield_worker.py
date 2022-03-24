@@ -59,6 +59,7 @@ class ByzshieldWorker(DistributedWorker):
             # logger.info("DEBUG_W_BYZ: self._group_seeds: {}".format(self._group_seeds))
             # logger.info("DEBUG_W_BYZ: self.ell: {}".format(self.ell))
             # logger.info("DEBUG_W_BYZ: self._err_choice: {}".format(self._err_choice))
+            # logger.info("DEBUG_W_BYZ: float_type: {}".format(float_type))
 
     def build_model(self):
         # build network
@@ -86,8 +87,16 @@ class ByzshieldWorker(DistributedWorker):
         self.criterion = nn.CrossEntropyLoss()
         # assign a buffer for receiving models from parameter server
         self.init_recv_buf() # ~ creates a buffer equal to the model size & shape
+        
+        # ~ test
+        if self.rank == 1:
+            logger.info("DEBUG_W_BYZ: Torch device: {} {}".format(self._device, type(self._device)))
+            
+            # ~ Total model size in bytes
+            # logger.info("DEBUG_W_BYZ: self.network bytes: {}".format(sum([param.nelement()*param.element_size() for param in self.network.parameters()])))
 
         self.network.to(self._device)
+
 
     def train(self, train_loader, test_loader):
         # the first step we need to do here is to sync fetch the inital worl_step from the parameter server
@@ -135,13 +144,13 @@ class ByzshieldWorker(DistributedWorker):
                 # worker exit task
                 if self.cur_step == self._max_steps:
                     break
-                X_batch, y_batch = train_image_batch.to(self._device), train_label_batch.to(self._device) # ~ tensors
+                X_batch, y_batch = train_image_batch, train_label_batch # ~ tensors
                 
                 # ~ test
                 # logger.info("DEBUG_W_BYZ: y_batch: {}".format(y_batch))
                 # if self.rank == 1:
-                    # logger.info("DEBUG_W_BYZ: X_batch: {}, {}".format(type(X_batch), X_batch.shape))
-                    # logger.info("DEBUG_W_BYZ: y_batch: {}, {}".format(type(y_batch), y_batch.shape))
+                    # logger.info("DEBUG_W_BYZ: X_batch: {}, {}, {}, {}, {}, {}".format(type(X_batch), X_batch.dtype, X_batch.shape, X_batch.nelement(), X_batch.element_size(), X_batch.element_size()*X_batch.nelement()))
+                    # logger.info("DEBUG_W_BYZ: y_batch: {}, {}, {}, {}, {}, {}".format(type(y_batch), y_batch.dtype, y_batch.shape, y_batch.nelement(), y_batch.element_size(), y_batch.element_size()*y_batch.nelement()))
                     # logger.info("DEBUG_W_BYZ: train_image_batch: {}, {}".format(type(train_image_batch), train_image_batch.shape))
                     # logger.info("DEBUG_W_BYZ: train_label_batch: {}, {}".format(type(train_label_batch), train_label_batch.shape))
                 
@@ -154,7 +163,7 @@ class ByzshieldWorker(DistributedWorker):
                     # grads.append(np.empty((0,)+p.shape[1:]).astype(float_type)) # torch.Size is in fact a tuple, so it supports the same operations
                     
                     # method 2: pre-allocate an array for all files of the worker (0-th dimension) with same remaining dimensions [1,...], needs to be paired with method 2 later on ...
-                    grads.append(np.empty((self.ell*p.shape[0],)+p.shape[1:]).astype(float_type)) # torch.Size is in fact a tuple, so it supports the same operations
+                    grads.append(np.empty((self.ell*p.shape[0],)+p.shape[1:], dtype=float_type)) # torch.Size is in fact a tuple, so it supports the same operations
                     
                     # ~ test
                     # just prints the current layer's dimensions 1,2,... with the 0-th dimension zeroed
@@ -162,6 +171,9 @@ class ByzshieldWorker(DistributedWorker):
                         # logger.info("DEBUG_W_BYZ: p.shape[0]: {}".format(p.shape))
                         # logger.info("DEBUG_W_BYZ: grads[i].shape: {}".format(grads[ctr].shape))
                     # ctr += 1
+                
+                # ~ test
+                # if self.rank == 1: logger.info("DEBUG_W_BYZ: grads in bytes: {}".format(sum([g.nbytes for g in grads])))
                     
                     
                 while True:
@@ -221,21 +233,25 @@ class ByzshieldWorker(DistributedWorker):
                             # X_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1),...].detach().numpy())
                         # np.save('BYZSHIELD_worker_'+str(self.rank)+'_file_'+str(file)+'_y_batch', 
                             # y_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1)].detach().numpy())
-                            
+                        
+                        # ~ Move NN to torch device (CPU or GPU)
+                        self.network.to(self._device)
+                        
                         self.network.train()
                         self.optimizer.zero_grad()
                         # forward step
                         forward_start_time = time.time()
                         
-                        # ~ pick only the samples of current file from batch, and preserve the rest of the dimensions of the tensor
-                        logits = self.network(X_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1),...])
-                        loss = self.criterion(logits, y_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1)])
+                        # ~ Pick only the samples of current file from batch, and preserve the rest of the dimensions of the tensor.
+                        # Also, move input data and labels to torch device (CPU or GPU).
+                        logits = self.network(X_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1),...].to(self._device))
+                        loss = self.criterion(logits, y_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1)].to(self._device))
                         
                         forward_duration += time.time()-forward_start_time
                         
                         # ~ test
                         # if self.rank == 1:
-                            # logger.info("DEBUG_W_BYZ: logits: {} {} {} {}".format(type(logits), logits.shape, logits, logits.detach().numpy()))
+                            # logger.info("DEBUG_W_BYZ: logits: {} {} {} {}".format(type(logits), logits.dtype, logits.shape, logits.element_size()*logits.nelement()))
                             
                         # ~ test
                         # if file == 0: # ~ for one file
@@ -255,7 +271,11 @@ class ByzshieldWorker(DistributedWorker):
                             # logger.info("DEBUG_W_BYZ: backward_duration[i]: {}".format(time.time()-backward_start_time))
 
                         # ~ (list) the shape of these gradients depends on the network layers only, not on batchsize or other parameters, the length of the list is equal to the number of layers, see DEBUG below
-                        file_grads = [p.grad.detach().numpy().astype(float_type) for p in self.network.parameters()]
+                        if self._device == torch.device("cpu"):
+                            file_grads = [p.grad.detach().numpy().astype(float_type) for p in self.network.parameters()]
+                        else:
+                            # ~ If CUDA is used, we need to copy the tensor to the main memory first
+                            file_grads = [p.grad.detach().cpu().numpy().astype(float_type) for p in self.network.parameters()]
                         
                         # ~ ASPIS: If caller rank is adversarial, distort the current file if its group is fully adversarial or all its non-adversaries are in the disagreements set
                         # Disabled if ALIE is enabled
@@ -289,6 +309,9 @@ class ByzshieldWorker(DistributedWorker):
                                 for i in range(len(file_grads)):
                                     # ~ The actual type of distortion will depend on "self._err_mode"
                                     file_grads[i] = err_simulation(file_grads[i], self._err_mode)
+                                    
+                        # ~ test
+                        # if self.rank == 1: logger.info("DEBUG_W_BYZ: file_grads in bytes: {}".format(sum([g.nbytes for g in file_grads])))
 
                         # save_start_time = time.time() # ~ test
                         
@@ -322,7 +345,7 @@ class ByzshieldWorker(DistributedWorker):
                             # np.save('worker'+str(self.rank)+'_grads_layer'+str(lay)+'_file'+str(file), file_grads[lay])
 
                         # ~ we still pick only the appropriate batch's labels & torch.long() converts to torch.int64
-                        prec1, prec5 = accuracy(logits.detach(), train_label_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1)].long(), topk=(1, 5))
+                        prec1, prec5 = accuracy(logits.detach(), train_label_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1)].long().to(self._device), topk=(1, 5))
                         
                     # in current setting each group cotains k workers, we let each worker calculate k same batches
                     c_start = time.time()
@@ -330,9 +353,9 @@ class ByzshieldWorker(DistributedWorker):
                     c_duration = time.time() - c_start
 
                     computation_time = forward_duration + backward_duration
-                    logger.info('W_BYZ: byzshield_worker: {}, Step: {}, Epoch: {} [{}/{} ({:.0f}%)], Loss: {:.4f}, Time Cost: {:.4f}, Comp: {:.4f}, Comm: {:.4f}, Prec@1: {}, Prec@5: {}'.format(self.rank,
+                    logger.info('W_BYZ: byzshield_worker: {}, Step: {}, Epoch: {} [{}/{} ({:.0f}%)], Loss: {:.4f}, Time Cost: {:.4f}, Comp: {:.4f}, Comm: {:.4f} + {:.4f}, Prec@1: {}, Prec@5: {}'.format(self.rank,
                          self.cur_step, num_epoch, batch_idx * self.batch_size, len(train_loader.dataset), 
-                            (100. * (batch_idx * self.batch_size) / len(train_loader.dataset)), loss.item(), time.time()-iter_start_time, computation_time, c_duration+fetch_weight_duration, prec1.numpy()[0], prec5.numpy()[0]))
+                            (100. * (batch_idx * self.batch_size) / len(train_loader.dataset)), loss.item(), time.time()-iter_start_time, computation_time, fetch_weight_duration, c_duration, prec1.cpu().numpy()[0], prec5.cpu().numpy()[0]))
                     
                     # ~ test
                     # logger.info('W_BYZ: byzshield_worker: {}, Step: {}, Epoch: {}, Save Time Cost: {:.4f}'.format(self.rank, self.cur_step, num_epoch, save_duration))

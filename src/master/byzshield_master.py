@@ -1,4 +1,4 @@
-from .utils import *
+from .utils import * 
 from .baseline_master import SyncReplicasMaster_NN
 
 import logging # ~ for comments on logging see "distributed_nn.py"
@@ -11,6 +11,8 @@ from functools import reduce
 import networkx as nx
 from itertools import product
 from collections import Counter
+
+import gc
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -110,6 +112,18 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
         # ~ Files in which all participants are adversaries (used if detection is enabled)
         self.fullyDistortedFiles = []
         
+        self._lr_warmup = kwargs['lr_warmup']
+        self._maxlr = kwargs['maxlr']
+        self._maxlr_steps = kwargs['maxlr_steps']
+        self._lr_annealing = kwargs['lr_annealing']
+        self._lr_annealing_minlr = kwargs['lr_annealing_minlr']
+        self._lr_annealing_cycle_steps = kwargs['lr_annealing_cycle_steps']
+        self._max_grad_l2norm = kwargs['max_grad_l2norm']
+        
+        # ~ If learning rate warmup is enabled, the starting learning rate depends on that schedule
+        if self._lr_warmup == "yes":
+            self.lr = 1/self._maxlr_steps*self._maxlr
+        
         # ~ test
         # logger.info("DEBUG_PS_BYZ: self._group_list: {}".format(self._group_list))
         # logger.info("DEBUG_PS_BYZ: self.workerFileHt: {}".format(self.workerFileHt))
@@ -117,6 +131,15 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
         # logger.info("DEBUG_PS_BYZ: self._approach: {}".format(self._approach))
         # logger.info("DEBUG_PS_BYZ: self.num_workers: {}".format(self.num_workers))
         # logger.info("DEBUG_PS_BYZ: self._group_size: {}".format(self._group_size))
+        logger.info("DEBUG_PS_BYZ: self._lr_warmup: {}".format(self._lr_warmup))
+        logger.info("DEBUG_PS_BYZ: self._maxlr: {}".format(self._maxlr))
+        logger.info("DEBUG_PS_BYZ: self._maxlr_steps: {}".format(self._maxlr_steps))
+        logger.info("DEBUG_PS_BYZ: self._lr_annealing: {}".format(self._lr_annealing))
+        logger.info("DEBUG_PS_BYZ: self._lr_annealing_minlr: {}".format(self._lr_annealing_minlr))
+        logger.info("DEBUG_PS_BYZ: self._lr_annealing_cycle_steps: {}".format(self._lr_annealing_cycle_steps))
+        logger.info("DEBUG_PS_BYZ: self._max_grad_l2norm: {}".format(self._max_grad_l2norm))
+        logger.info("DEBUG_PS_BYZ: self.lr: {}".format(self.lr))
+        logger.info("DEBUG_PS_BYZ: Torch device: {} {}".format(self._device, type(self._device)))
 
     def build_model(self):
         # ~ test
@@ -148,15 +171,30 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             self.cur_step = int(self._checkpoint_step)+1
 
         # assign a gradient accumulator to collect gradients from workers
-        self.grad_accumulator = ByzShieldGradientAccumulator(self.network, self.world_size-1, self.ell, mode=self._compress_grad) # ~ passes the number of workers as the number of gradients to accumulate and the model so that it knows the dimensions
+        # self.grad_accumulator = ByzShieldGradientAccumulator(self.network, self.world_size-1, self.ell, mode=self._compress_grad) # ~ passes the number of workers as the number of gradients to accumulate and the model so that it knows the dimensions
+
+        # ~ test
+        # This changes depending on whether "compress-grad" is disabled (it could be np.ndarray or bytearray)
+        # if type(self.grad_accumulator.gradient_aggregator[0][0]) == np.ndarray:
+            # logger.info("PS_BYZ: Master node self.grad_accumulator.gradient_aggregator dtype: {}".format(self.grad_accumulator.gradient_aggregator[0][0].dtype))
+            # logger.info("PS_BYZ: Master node self.grad_accumulator.gradient_aggregator bytes: {}".format(sum([sum([workerGrad.nbytes for workerGrad in layerLst]) for layerLst in self.grad_accumulator.gradient_aggregator])))
+        # elif type(self.grad_accumulator.gradient_aggregator[0][0]) == bytearray:
+            # logger.info("PS_BYZ: Master node self.grad_accumulator.gradient_aggregator bytes: {}".format(sum([sum([len(workerGrad) for workerGrad in layerLst]) for layerLst in self.grad_accumulator.gradient_aggregator])))
+
         self.init_model_shapes()
+
+        # ~ test
+        # logger.info("PS_BYZ: Master node self._coded_grads_buffer bytes: {}".format(sum([sum([sum([sum([g.nbytes for g in workerFileLayerGrad]) for workerFileLayerGrad in workerFileGrad]) for workerFileGrad in fileGrads]) for fileGrads in self._coded_grads_buffer.values()])))
+        # logger.info("PS_BYZ: Master node self._draco_lite_aggregation_buffer bytes: {}".format(self._draco_lite_aggregation_buffer.nbytes))
+        # logger.info("PS_BYZ: Master node self._grad_aggregate_buffer bytes: {}".format(sum([x.nbytes for x in self._grad_aggregate_buffer])))
+
         self.optimizer = SGDModified(self.network.parameters(), lr=self.lr, momentum=self.momentum)
         #self.optimizer = optim.SGD(self.network.parameters(), lr=self.lr, momentum=self.momentum)
 
         self.network.to(self._device)
 
     def init_model_shapes(self):
-        tmp_aggregate_buffer = [] # ~ list (one element per model layer) of np.ndarrays of layer shapes (will be replicated f*r times, i.e., one time for each replica of each file for INPUT to 1st stage)
+        self.tmp_aggregate_buffer = [] # ~ list (one element per model layer) of np.ndarrays of layer shapes (will be replicated f*r times, i.e., one time for each replica of each file for INPUT to 1st stage)
         # tmp_recv_buffer = [] # ~ same as tmp_aggregate_buffer but the 0-th dimension of each layer is scaled by ell to store all files' gradients of a worker's transmission, will be replicated K times instead of f*r
         self._model_param_counter = 0
         for param_idx, param in enumerate(self.network.parameters()):
@@ -166,24 +204,67 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
 
             all_files_shape = (shape[0]*self.ell,)+shape[1:] # ~ for all ByzShield files
             self._model_shapes.append(all_files_shape)
-            self._grad_aggregate_buffer.append(np.zeros(shape, dtype=float_type))
-            tmp_aggregate_buffer.append(np.zeros(shape, dtype=float_type))
+            # self._grad_aggregate_buffer.append(np.zeros(shape, dtype=float_type))
+            self.tmp_aggregate_buffer.append(np.zeros(shape, dtype=float_type))
             # tmp_recv_buffer.append(np.zeros(all_files_shape, dtype=float_type))
 
         #if self._update_mode == "maj_vote" or self._update_mode == "draco_lite":
-        for k, v in self._group_list.items(): # ~ k=0...f-1, v: list of workers (ranks) with k
-            for i, l in enumerate(v): # ~ for each worker (rank) in current group v, enumeration is not needed, remove it
-                if k not in self._coded_grads_buffer.keys():
-                    self._coded_grads_buffer[k] = [copy.deepcopy(tmp_aggregate_buffer)]
-                else:
-                    self._coded_grads_buffer[k].append(copy.deepcopy(tmp_aggregate_buffer))
+        # for k, v in self._group_list.items(): # ~ k=0...f-1, v: list of workers (ranks) with k
+            # for i, l in enumerate(v): # ~ for each worker (rank) in current group v, enumeration is not needed, remove it
+                # if k not in self._coded_grads_buffer.keys():
+                    # self._coded_grads_buffer[k] = [copy.deepcopy(tmp_aggregate_buffer)]
+                # else:
+                    # self._coded_grads_buffer[k].append(copy.deepcopy(tmp_aggregate_buffer))
 
         # buffer setted up for draco-lite aggregations
         self._sub_grad_size = len(self._group_list) # ~ (== f) no. of groups, i.e., no. of majority votes to be aggregated at the next stage
-        self._draco_lite_aggregation_buffer = np.zeros((self._sub_grad_size, self._model_param_counter), dtype=float_type) # ~ np.ndarray of shape f x (no. of model parameters) to store the majority votes after aggregation of each file ("key" of self._coded_grads_buffer)
+        # self._draco_lite_aggregation_buffer = np.zeros((self._sub_grad_size, self._model_param_counter), dtype=float_type) # ~ np.ndarray of shape f x (no. of model parameters) to store the majority votes after aggregation of each file ("key" of self._coded_grads_buffer)
+    
+    def init_grad_accumulator(self):
+        # ~ Remove the data structure of 2 steps back, i.e., the input to the 2nd filtering stage
+        # Need to set to None since it is a np.ndarray
+        self._draco_lite_aggregation_buffer = None
+        
+        self.grad_accumulator = ByzShieldGradientAccumulator(self.network, self.world_size-1, self.ell, mode=self._compress_grad)
+        
+    def init_coded_grads_buffer(self):
+        # ~ Remove the data structure of 2 steps back, i.e., the output of the 2nd filtering stage (single aggregated gradient used for model update)
+        del self._grad_aggregate_buffer
+        gc.collect()
+        
+        self._coded_grads_buffer = {}
+        for k, v in self._group_list.items():
+            for i, l in enumerate(v):
+                if k not in self._coded_grads_buffer.keys():
+                    self._coded_grads_buffer[k] = [copy.deepcopy(self.tmp_aggregate_buffer)]
+                else:
+                    self._coded_grads_buffer[k].append(copy.deepcopy(self.tmp_aggregate_buffer))
+                    
+    def init_draco_lite_aggregation_buffer(self):
+        # ~ Remove the data structure of 2 steps back, i.e., the ByzShieldGradientAccumulator to store received gradients
+        del self.grad_accumulator
+        gc.collect()
+        
+        self._draco_lite_aggregation_buffer = np.zeros((self._sub_grad_size, self._model_param_counter), dtype=float_type)
+        
+    def init_grad_aggregate_buffer(self):
+        # ~ Remove the data structure of 2 steps back, i.e., the input to the 1st filtering stage
+        del self._coded_grads_buffer
+        gc.collect()
+        
+        self._grad_aggregate_buffer = []
+        for param_idx, param in enumerate(self.network.parameters()):
+            shape = param.size()
+            self._grad_aggregate_buffer.append(np.zeros(shape, dtype=float_type))
+            
+        # logger.info("DEBUG_PS_BYZ: len(_grad_aggregate_buffer) of master: {}".format(len(self._grad_aggregate_buffer)))
+        # for i in range(len(self._grad_aggregate_buffer)):
+            # logger.info("DEBUG_PS_BYZ: _grad_aggregate_buffer[i] of master: {}, {}".format(type(self._grad_aggregate_buffer[i]), self._grad_aggregate_buffer[i].shape))
+        
 
     def start(self):
         # ~ test
+        # Note: this is useless if you use init_grad_aggregate_buffer()
         # logger.info("DEBUG_PS_BYZ: len(_grad_aggregate_buffer) of master: {}".format(len(self._grad_aggregate_buffer)))
         # for i in range(len(self._grad_aggregate_buffer)):
             # logger.info("DEBUG_PS_BYZ: _grad_aggregate_buffer[i] of master: {}, {}".format(type(self._grad_aggregate_buffer[i]), self._grad_aggregate_buffer[i].shape))
@@ -191,7 +272,10 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
         # ~ test
         # for x in self.network.parameters():
             # logger.info("DEBUG_PS_BYZ: network.parameters()[i] of master: {}, {}, {}".format(type(x), x.shape, x.size()))
-            
+        
+        # ~ test
+        # assert 0 == 1
+        
         # the first step we need to do here is to sync fetch the inital worl_step from the parameter server
         # we still need to make sure value fetched from ps is 1
         self.async_bcast_step() # ~ (baseline) updates step and sends it to workers, matches worker's sync_fetch_step()
@@ -210,6 +294,9 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             # logger.info("DEBUG_PS_BYZ: Boss finished async_bcast_step for step {}".format(i))
 
             self.async_bcast_layer_weights_bcast()
+            
+            self.init_grad_accumulator()
+            self.init_coded_grads_buffer()
             
             # set the gradient fetch step and gather the request
             gradient_fetch_requests=self.async_fetch_gradient_start()
@@ -289,8 +376,8 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
 
             update_duration = time.time() - update_start
             # reset essential elements
-            self.meset_grad_buffer()
-            self.grad_accumulator.meset_everything()
+            # self.meset_grad_buffer()
+            # self.grad_accumulator.meset_everything()
 
             logger.info("PS_BYZ: Master Step: {}, Method Time Cost: {}, Update Time Cost: {}".format(self.cur_step, method_duration, update_duration))
             
@@ -333,12 +420,61 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
                 # if layer_idx == lay:
                     # np.save('PS_worker'+str(source)+'_grads_layer'+str(lay)+'_file'+str(file), self._coded_grads_buffer[file][v.index(source)][layer_idx])
                         
+    
+    # ~ Implementation of cosine annealing based on https://www.jeremyjordan.me/nn-learning-rate/ advised by https://github.com/JonasGeiping/fullbatchtraining
+    # Assumption 1: Cosine annealing takes place after the end of warmup to reach self._maxlr (or at the beginning of the training if self._maxlr_steps == 0) but not before it.
+    #   So, self.cur_step-self._maxlr_steps >= 0
+    # Assumption 2: Maximum learning rate is the same as self._maxlr
+    def _cosine_annealing_lr(self):
+        # ~ Steps elapsed since last annealing restarted
+        Tcurrent = (self.cur_step-self._maxlr_steps)%self._lr_annealing_cycle_steps
         
+        # ~ test
+        # logger.info("DEBUG_PS_BYZ: Tcurrent: {}".format(Tcurrent))
+        
+        return self._lr_annealing_minlr + 0.5*(self._maxlr - self._lr_annealing_minlr)*(1 + math.cos(Tcurrent/self._lr_annealing_cycle_steps*math.pi))
+        
+    # ~ Clip gradient based on https://github.com/JonasGeiping/fullbatchtraining (advised by the same paper).
+    # The norm utilized is the Euclidean norm.
+    def _clip_gradient(self):
+        # ~ Current value of the norm
+        grad_norm = np.linalg.norm(np.stack([np.linalg.norm(g) for g in self._grad_aggregate_buffer]))
+        
+        # ~ test
+        logger.info("DEBUG_PS_BYZ: Before clipping _grad_aggregate_buffer norm: {}".format(np.linalg.norm(np.stack([np.linalg.norm(g) for g in self._grad_aggregate_buffer]))))
+        
+        # ~ Clip norm using element-wise multiplication. This operation is out-of-place.
+        if grad_norm > self._max_grad_l2norm:
+            for i,g in enumerate(self._grad_aggregate_buffer):
+                self._grad_aggregate_buffer[i] = np.multiply(g, self._max_grad_l2norm/(grad_norm + 1e-6))
+            
+        # ~ test
+        logger.info("DEBUG_PS_BYZ: After clipping _grad_aggregate_buffer norm: {}".format(np.linalg.norm(np.stack([np.linalg.norm(g) for g in self._grad_aggregate_buffer]))))
+    
     def _model_update(self):
-        if self.cur_step % self.lr_step == 0:
-            self.optimizer.lr_update(updated_lr=(self.lr * self.gamma ** (self.cur_step // self.lr_step)))
-        self.optimizer.step(grads=self._grad_aggregate_buffer, mode="byzshield") # ~ Keep it as "byzshield" for both BYZSHIELD and ASPIS, no need to bother as the function does the same thing in both cases.
-
+        if self._lr_warmup == "no" and self._lr_annealing == "no":
+            if self.cur_step % self.lr_step == 0:
+                self.optimizer.lr_update(updated_lr=(self.lr * self.gamma ** (self.cur_step // self.lr_step)))
+        else:
+            if self._lr_warmup == "yes" and self.cur_step <= self._maxlr_steps:
+                # ~ This assumes that learning rate warmup starts at the beginning of training
+                self.optimizer.lr_update(updated_lr=(self.cur_step/self._maxlr_steps)*self._maxlr)
+            
+            # ~ This assumes that annealing happens after the end of warmup (or at the beginning of the training if self._maxlr_steps == 0) but not before it
+            if self._lr_annealing == "yes" and self.cur_step > self._maxlr_steps:
+                self.optimizer.lr_update(updated_lr=self._cosine_annealing_lr())
+        
+        # ~ Clip gradient if a max value for the norm has been specified.
+        # This will change self._grad_aggregate_buffer out-of-place.
+        if self._max_grad_l2norm > 0:
+            self._clip_gradient()
+            
+        # ~ For both BYZSHIELD and ASPIS, no need to bother as the function does the same thing in both cases.
+        if self._device == torch.device("cpu"):       
+            self.optimizer.step(grads=self._grad_aggregate_buffer, mode="byzshield_cpu")
+        else:
+            self.optimizer.step(grads=self._grad_aggregate_buffer, mode="byzshield_gpu")
+            
     # multi-core optimized verion
     def _draco_lite_aggregation(self):
     
@@ -353,6 +489,8 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
                             # np.save('PS_received_worker'+str(worker)+'_grads_layer'+str(lay)+'_file'+str(file), self._coded_grads_buffer[file][group.index(worker)][layer_idx])
     
         # logger.info("_draco_lite_aggregation_buffer before shape: {}".format(self._draco_lite_aggregation_buffer.shape))
+        
+        self.init_draco_lite_aggregation_buffer()
         
         if self._adversarial_detection == "clique":
             # ~ Try to find and exclude the adversaries
@@ -676,6 +814,8 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
             # without bucketing:
             #aggr_res = __krum(self._draco_lite_aggregation_buffer, effective_s, self._draco_lite_aggregation_buffer.shape[0])
 
+        self.init_grad_aggregate_buffer()
+        
         # ~ This "unflattens" the final gradient for each model layer to match model shape for model update
         index_pointer = 0
         for j, p in enumerate(self.network.parameters()):
@@ -718,10 +858,10 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
                     # np.save('BYZSHIELD_draco_lite_aggregation_buffer_file_'+str(k)+'_lay'+str(j), _maj_grad)
                         
                 # ~ just a check that the gradient shape matches with the final shape for model update
-                try:
-                    assert self._grad_aggregate_buffer[j].shape == _maj_grad.shape
-                except AssertionError as e:
-                    warnings.warn("Gradient shapes incompatible, deprecated! ")
+                # try:
+                    # assert self._grad_aggregate_buffer[j].shape == _maj_grad.shape
+                # except AssertionError as e:
+                    # warnings.warn("Gradient shapes incompatible, deprecated! ")
 
                 # ~ flatten gradient (majority vote) and save it to a np.ndarray 
                 # the row is indexed by file and the column is indexed by "flattened" layer dimensions
@@ -749,10 +889,10 @@ class ByzshieldMaster(SyncReplicasMaster_NN): # ~ check if you can make it subcl
                 # if j == lay: # ~ j-th layer
                     # np.save('BYZSHIELD_draco_lite_aggregation_buffer_file_'+str(k)+'_lay'+str(j), _maj_grad)
 
-                try:
-                    assert self._grad_aggregate_buffer[j].shape == _maj_grad.shape
-                except AssertionError as e:
-                    warnings.warn("Gradient shapes incompatible, deprecated! ")
+                # try:
+                    # assert self._grad_aggregate_buffer[j].shape == _maj_grad.shape
+                # except AssertionError as e:
+                    # warnings.warn("Gradient shapes incompatible, deprecated! ")
 
                 self._draco_lite_aggregation_buffer[k, index_pointer:index_pointer+grad_size] = _maj_grad.reshape(-1)
                 index_pointer += grad_size

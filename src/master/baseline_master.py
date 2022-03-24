@@ -33,6 +33,7 @@ class SyncReplicasMaster_NN(NN_Trainer):
         self._max_steps = kwargs['max_steps']
         self._update_mode = kwargs['update_mode']
         self._compress_grad = kwargs['compress_grad']
+        self._device = kwargs['device']
         self._checkpoint_step = kwargs['checkpoint_step']
         self._s = kwargs['worker_fail']
         self._lis_simulation = kwargs['lis_simulation']
@@ -53,6 +54,8 @@ class SyncReplicasMaster_NN(NN_Trainer):
         self._fail_workers = kwargs['adversaries'] # ~ the same set of Byzantines will be used in ALIE (not a new random one)
         
         self._err_mode = kwargs['err_mode']
+        
+        # logger.info("PS_BASELINE: Torch device: {}".format(self._device))
 
     def build_model(self):
         # ~ test
@@ -255,7 +258,12 @@ class SyncReplicasMaster_NN(NN_Trainer):
         request_layers = [] # ~ never used
         for layer_idx, layer in enumerate(self.network.parameters()):
             request_workers = [] # ~ never used
-            layer_to_send = layer.detach().numpy().astype(float_type)
+            
+            if self._device == torch.device("cpu"):
+                layer_to_send = layer.detach().numpy().astype(float_type)
+            else:
+                # ~ If CUDA is used, we need to copy the tensor to the main memory first
+                layer_to_send = layer.detach().cpu().numpy().astype(float_type)
             
             # ~ test
             # ~ you need to store this separately for each scheme

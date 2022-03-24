@@ -8,7 +8,7 @@ import sys
 def compress(grad):
     assert isinstance(grad, np.ndarray)
     # ~ pack (compress) a NumPy array to a Python bytes object.
-    compressed_grad = blosc.pack_array(grad, cname='snappy')
+    compressed_grad = blosc.pack_array(grad, cname='blosclz')
     return compressed_grad
 
 # ~ returns np.ndarray

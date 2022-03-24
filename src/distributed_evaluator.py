@@ -92,7 +92,7 @@ class DistributedEvaluator(NN_Trainer):
         # ~ for file to write loss, top-1 and top-5 accuracies
         top1_filename = '/'.join(self._model_dir.split('/')[:-2]) + '/' + self._model_dir.split('/')[-2] + ".txt"
         self.outputF = open(top1_filename, "w+")
-        logger.info("Writing to file {}".format(top1_filename))
+        # logger.info("Writing to file {}".format(top1_filename))
         self.test_losses = "test_loss = [" # ~ will be Matlab-style
         self.prec1s = "prec1 = ["
         self.prec5s = "prec5 = ["
@@ -169,7 +169,7 @@ class DistributedEvaluator(NN_Trainer):
     def _load_model(self, file_path):
         self.network = build_model(self.network_config, num_classes=10)
         with open(file_path, "rb") as f_:
-            self.network.load_state_dict(torch.load(f_))
+            self.network.load_state_dict(torch.load(f_, map_location='cpu'))
 
     def _model_dir_generator(self, next_step_to_fetch):
         return self._model_dir+"model_step_"+str(next_step_to_fetch)

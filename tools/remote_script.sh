@@ -34,9 +34,14 @@ for i in $(seq 2 $DEEPLEARNING_WORKERS_COUNT);
   # ~ test ONLY, use with caution to kill leftover Python processes at workers.
   # ssh -i ${KEY_PEM_NAME} deeplearning-worker${i} 'pkill -9 python'
   
+  start_time=$SECONDS
+  
   # scp -i ${KEY_PEM_NAME} -r ~/ASPIS deeplearning-worker${i}:~/
   # ~ same as in "local_scipt.sh" but it does not exclude data folders
   # rsync -avzh -e "ssh -i ${KEY_PEM_NAME}" ~/ASPIS ubuntu@deeplearning-worker${i}:~/ --exclude '__pycache__'
   rsync -avzh -e "ssh -i ${KEY_PEM_NAME}" ~/ASPIS${PROJECT_INDEX} ubuntu@deeplearning-worker${i}:~/ --exclude '__pycache__'
+  
+  elapsed=$(( SECONDS - start_time ))
   echo "Done writing public key to worker: deeplearning-worker${i}"
+  echo "Transmission time (sec): $elapsed"
  done

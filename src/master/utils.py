@@ -21,6 +21,7 @@ from compression import g_decompress, w_compress
 #import c_coding
 from util import * # ~ will import models from "model_ops", ...
 import warnings
+from model_ops.utils import float_type
 
 STEP_START_ = 1
 
@@ -118,12 +119,12 @@ class ByzShieldGradientAccumulator(GradientAccumulator):
                 _shape = param.size()
                 # ~ ell factor for first dimension and the rest are the same
                 if self._mode == 'None':
-                    tmp_aggregator.append(np.zeros((_shape[0]*ell,) + _shape[1:]))
+                    tmp_aggregator.append(np.zeros((_shape[0]*ell,) + _shape[1:], dtype=float_type))
                 elif self._mode == 'compress':                   
                     if len(_shape) == 1:
-                        tmp_aggregator.append(bytearray(getsizeof(np.zeros((_shape[0]*ell,)))*2))
+                        tmp_aggregator.append(bytearray(getsizeof(np.zeros((_shape[0]*ell,), dtype=float_type))*2))
                     else:
-                        tmp_aggregator.append(bytearray(getsizeof(np.zeros((_shape[0]*ell,) + _shape[1:]))*2))
+                        tmp_aggregator.append(bytearray(getsizeof(np.zeros((_shape[0]*ell,) + _shape[1:], dtype=float_type))*2))
             # initialize the gradient aggragator
             self.gradient_aggregator.append(tmp_aggregator)
             self.gradient_aggregate_counter.append(0)
@@ -148,4 +149,4 @@ class ByzShieldGradientAccumulator(GradientAccumulator):
         else:
             for i, tmp_aggregator in enumerate(self.gradient_aggregator):
                 for j, buf in enumerate(tmp_aggregator):
-                    self.gradient_aggregator[i][j] = np.zeros(self.gradient_aggregator[i][j].shape)
+                    self.gradient_aggregator[i][j] = np.zeros(self.gradient_aggregator[i][j].shape, dtype=float_type)

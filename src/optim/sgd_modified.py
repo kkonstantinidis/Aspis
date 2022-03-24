@@ -68,8 +68,20 @@ class SGDModified(Optimizer):
             nesterov = group['nesterov']
 
             for i,p in enumerate(group['params']):
-                if mode == 'normal' or mode=='draco_lite' or mode=='draco_lite_attack' or mode=='byzshield':
+                if mode == 'normal' or mode=='draco_lite' or mode=='draco_lite_attack' or mode=='byzshield_cpu':
                     d_p = torch.from_numpy(grads[i]).float()
+                elif mode == 'byzshield_gpu':
+                    # # ~ For this, I use the same logic as in util.py as default device for .cuda() is "cuda:0"
+                    # if torch.cuda.device_count() > 1:
+                        # # ~ Use 2nd GPU
+                        # torch.cuda.set_device(torch.device("cuda:1"))
+                    # else:
+                        # # ~ Use 1st GPU
+                        # torch.cuda.set_device(torch.device("cuda:0"))
+                
+                    # ~ This is only for BYZSHIELD and ASPIS where CUDA is supported
+                    d_p = torch.from_numpy(grads[i]).cuda().float()
+                    
                 #elif mode=='geometric_median' or mode=='maj_vote' or mode=='cyclic' or mode=='krum':
                 elif mode in ('geometric_median', 'maj_vote', 'cyclic', 'krum', 'multi-krum', 'bulyan', 'coord-median', 'sign-sgd'):
                     d_p = torch.from_numpy(grads[i].reshape(p.size())).float()
