@@ -199,7 +199,7 @@ The training algorithm should be run by the PS instance executing file `run_pyto
 | `train-dir` | Directory to save model backups for evaluation (for AWS this should be the EFS folder). |
 | `local-remote` | `local` (for local training) or `remote` (for training on AWS). |
 | `rama-m` | Value of *m* (in paper), only needed for Ramanujan Case 2. |
-| `detox-attack` | Our attack on DETOX (see `--approach`): `worst` (optimally attacks majority within groups), `benign` or `whole_group`.  |
+| `detox-attack` | Our attack on DETOX (see `--approach`): `worst` (optimally attacks majority within groups), `benign` or `whole_group`. If `approach=draco_lite_attack`, this method overrides `byzantine-gen`.  |
 | `byzantine-gen` | Type of byzantine set generation (`random` (random for each iteration) or `hard_coded` (fixed for all iterations and set in `util.py`)) or `random_window` (random adversarial set in each contiguous window of `adv_win_length` iterations). These are supported by all `approach`es. |
 | `gamma` | Learning rate decay (linear). |
 | `lr-step` | Frequency of learning rate decay (measured in number of iterations). Applies only if `lr-warmup=no` (see below). |
