@@ -19,6 +19,8 @@ The first steps we need to do before installing the required packages are
 
 Create a security group ([instructions][security_group_create]) with the above settings and give it a name, e.g., `aspis_security_group`. We will also use it later.
 
+**Note**: The above port range guarantees that MPI can run. Otherwise, `mpirun` may hang indefinitely.
+
 ## Prerequisites/Anaconda installation (both local and remote)
 ```sh
 sudo apt-get update && sudo apt-get upgrade
