@@ -29,12 +29,12 @@ cfg = Cfg({
     "method" : "spot",
     # Region speficiation
     "region" : "us-east-1",
-    "availability_zone" : "us-east-1d",
+    "availability_zone" : "any", # ~ Set to "any" or a specific zone, e.g., "us-east-1e"
     # Machine type - instance type configuration.
     "master_type" : "i3.16xlarge",
     "worker_type" : "r5n.24xlarge",
     # please only use this AMI for pytorch
-    "image_id": "ami-001c07ba086f358ba",
+    "image_id": "ami-0b0ed449c1049b380",
     # Launch specifications
     "spot_price" : "5",                 # Has to be a string
     # SSH configuration
@@ -43,7 +43,7 @@ cfg = Cfg({
 
     # NFS configuration
     # To set up these values, go to Services > Elastic File System > Create file system, and follow the directions.
-    "nfs_ip_address" : "172.31.18.129",          # us-east-1c
+    "nfs_ip_address" : "172.31.16.237",          # us-east-1c
     "nfs_mount_point" : "/home/ubuntu/shared",       # NFS base dir
     "base_out_dir" : "%(nfs_mount_point)s/%(name)s", # Master writes checkpoints to this directory. Outfiles are written to this directory.
     "setup_commands" :
@@ -185,8 +185,12 @@ def mxnet_ec2_run(argv, configuration):
             launch_specs = {"KeyName" : configuration["key_name"],
             "ImageId" : configuration["image_id"],
             "InstanceType" : instance_type,
-            "Placement" : {"AvailabilityZone":configuration["availability_zone"]},
+            # "Placement" : {"AvailabilityZone":configuration["availability_zone"]},
             "SecurityGroups": configuration["security_group"]}
+            
+            if configuration["availability_zone"] != "any":
+                launch_specs["Placement"] = {"AvailabilityZone":configuration["availability_zone"]}
+                
             if method == "spot":
                 client.request_spot_instances(InstanceCount=count, LaunchSpecification=launch_specs, SpotPrice=configuration["spot_price"], LaunchGroup="dl_group")
             elif method == "reserved":

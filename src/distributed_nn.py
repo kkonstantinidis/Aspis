@@ -120,7 +120,17 @@ def add_fit_args(parser):
     parser.add_argument('--max-grad-l2norm', type=float, default=0, metavar='N',
                         help='Max L-2 norm for gradient clipping (set to 0 to disable)')
     parser.add_argument('--cyclic-ell', type=int, default=1, metavar='N',
-                        help='Computation load per worker for the cyclic code in the C3LES paper, Figure 3')
+                        help='Computation load per worker for the cyclic code in the C3LES paper (Figure 3)')
+    parser.add_argument('--pair-groups', type=int, default=1, metavar='N',
+                        help='Number of joint files of each pair of workers')
+    parser.add_argument('--adv-win-length', type=int, default=1, metavar='N',
+                        help='How often to pick a new set of adversaries (in # of iterations)')
+    parser.add_argument('--det-win-length', type=int, default=1, metavar='N',
+                        help='How often to reset the agreements counter for detection at the PS level (in # of iterations)')
+    parser.add_argument('--permute-files', type=str, default="no", metavar='N',
+                        help='Whether to randomly permute the file assignment after each iteration')
+    parser.add_argument('--tolerance', type=float, default=10, metavar='N',
+                        help='Tolerance for gradient equality checks')
                         
                         
     args = parser.parse_args()
@@ -185,9 +195,9 @@ if __name__ == "__main__": # ~ PS and workers will call this
         logger.info("kwargs_master: {}".format(kwargs_master))
         logger.info("kwargs_worker: {}".format(kwargs_worker))
             
-    # test
-    if rank == 0:        
-        logger.info("Attack: Byzantines for 1st iteration are ranks: {}".format(' '.join(map(str, kwargs_worker['adversaries'][0]))))
+    # ~ test - MAYBE NOT NEEDED as iterations are 1-indexed, see _generate_adversarial_nodes()
+    # if rank == 0:        
+        # logger.info("Attack: Byzantines for 1st iteration are ranks: {}".format(' '.join(map(str, kwargs_worker['adversaries'][0]))))
     
     # test
     # if rank > 0:
@@ -242,7 +252,7 @@ if __name__ == "__main__": # ~ PS and workers will call this
             logger.info("I am worker: {} in all {} workers, next step: {}".format(coded_worker.rank, coded_worker.world_size-1, coded_worker.next_step))
             coded_worker.train(train_loader=train_loader, test_loader=test_loader)
             logger.info("Now the next step is: {}".format(coded_worker.next_step))  
-    elif args.approach == "mols" or args.approach == "rama_one" or args.approach == "rama_two" or args.approach == "subset" or args.approach == "cyclic_c3les": # ~ MOLS, Ramanujan Case 1, Ramanujan Case 2, Subset assignment, Cyclic code in the C3LES paper, Figure 3
+    elif args.approach == "mols" or args.approach == "rama_one" or args.approach == "rama_two" or args.approach == "subset" or args.approach == "cyclic_c3les" or args.approach == "hard_coded": # ~ MOLS, Ramanujan Case 1, Ramanujan Case 2, Subset assignment, Cyclic code in the C3LES paper (Figure 3), Hard-coded assignment
         train_loader, _, test_loader = datum
         if rank == 0:
             coded_master = byzshield_master.ByzshieldMaster(comm=comm, **kwargs_master) # ~ util.py is importing this

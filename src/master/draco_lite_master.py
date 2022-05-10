@@ -58,6 +58,8 @@ class DracoLiteMaster(SyncReplicasMaster_NN):
         self._fail_workers = kwargs['adversaries'] # ~ the same set of Byzantines will be used in ALIE (not a new random one)
         
         self._err_mode = kwargs['err_mode']
+        
+        self._tolerance = kwargs['tolerance']
 
     def build_model(self):
         # ~ test
@@ -304,6 +306,17 @@ class DracoLiteMaster(SyncReplicasMaster_NN):
 
     # multi-core optimized verion
     def _draco_lite_aggregation(self):
+    
+        # ~ test
+        # lay = 0 # ~ layer index (0-indexed)
+        # if self.cur_step == 1:
+            # for file in self._group_list:
+                # group = self._group_list[file]
+                # for worker in group:
+                    # for layer_idx, _ in enumerate(self.network.parameters()):
+                        # if layer_idx == lay:
+                            # np.save('PS_received_worker'+str(worker)+'_grads_layer'+str(lay)+'_file'+str(file), self._coded_grads_buffer[file][group.index(worker)][layer_idx])
+                            
         self._grad_majority_vote()
 
         # optimization objectives:
@@ -590,7 +603,8 @@ class DracoLiteMaster(SyncReplicasMaster_NN):
                     if _maj_counter == 0:
                         _maj_grad = elem[j]
                         _maj_counter = 1
-                    elif np.array_equal(elem[j], _maj_grad):
+                    # elif np.array_equal(elem[j], _maj_grad):
+                    elif self.gradientsTolEqual(elem[j], _maj_grad): # ~ tolerance-based equality check
                         _maj_counter += 1
                     else:
                         _maj_counter -= 1
@@ -600,8 +614,10 @@ class DracoLiteMaster(SyncReplicasMaster_NN):
                     # np.save('DETOX_coded_grads_buffer_groupInd_'+str(k)+'_workerInGroupInd_'+str(i)+'_lay'+str(j), elem[j])
                         
                 # ~ test
-                # if k == 0: # ~ k-th group
-                # np.save('DETOX_draco_lite_aggregation_buffer_groupInd_'+str(k)+'_lay'+str(j), _maj_grad)
+                # lay = 0
+                # if k == 0: # ~ k-th group (file)
+                # if j == lay: # ~ j-th layer
+                    # np.save('DETOX_draco_lite_aggregation_buffer_groupInd_'+str(k)+'_lay'+str(j), _maj_grad)
                         
                 # ~ Kostas test, remove this
                 # assert 0 == 1
@@ -633,7 +649,7 @@ class DracoLiteMaster(SyncReplicasMaster_NN):
         dummpy_adversarial_nodes = self._fail_workers[self.cur_step]
         
         # ~ test
-        # logger.info("DEBUG_PS_DETOX: ALIE byzantines: {}".format(dummpy_adversarial_nodes))
+        logger.info("DEBUG_PS_DETOX: ALIE byzantines: {}".format(dummpy_adversarial_nodes))
         
         for j, _ in enumerate(self.network.parameters()):
             # aggregate coded gradients from different groups together, this is stupid, try to avoid this
@@ -693,3 +709,25 @@ class DracoLiteMaster(SyncReplicasMaster_NN):
                         _relative_index_in_group = self._group_list[k].index(adv_index)
                         assert self._coded_grads_buffer[k][_relative_index_in_group][j].shape == _mal_grad.shape
                         self._coded_grads_buffer[k][_relative_index_in_group][j] = _mal_grad
+                        
+                        
+    # ~ From byzshield_master.py, see comments there
+    def gradientsTolEqual(self, g1, g2):
+        # ~ method 1: normalized norm difference and L-oo norm
+        # If |b| != 0, check if for L-2 norm: |a-b|/|b| <= tolerance (stronger condition). Also, check if all elements are close in absolute value (L-oo norm) using allclose() (weaker condition),
+        # i.e., if for each pair of elements x,y: |x-y| <= tolerance.
+        # Note: AND condition is required as DETOX breaks sometimes and decides the minority vote instead of the majority vote.
+        # g2Norm = np.linalg.norm(g2)
+        # gradDiff = np.subtract(g1, g2)
+        # return (g2Norm != 0 and np.linalg.norm(gradDiff)/g2Norm <= self._tolerance) and np.allclose(g1, g2, rtol = self._tolerance, atol = self._tolerance)
+
+        # method 2: normalized norm difference and L-2 norm
+        g1Norm = np.linalg.norm(g1)
+        g2Norm = np.linalg.norm(g2)
+        gradDiff = np.subtract(g1, g2)
+        # Prevent division by zero
+        return (g1Norm == 0 and g2Norm == 0) or (np.linalg.norm(gradDiff)/max(g1Norm, g2Norm) <= self._tolerance)
+        
+        # method 3: L-oo norm
+        # return np.allclose(g1, g2, rtol = 0, atol = self._tolerance)
+        

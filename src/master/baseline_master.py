@@ -349,7 +349,7 @@ class SyncReplicasMaster_NN(NN_Trainer):
         return
 
     def _load_model(self, file_path):
-        model_state_dict=torch.load(file_path)
+        model_state_dict=torch.load(file_path, map_location='cpu')
         self.network.load_state_dict(model_state_dict)
         logger.info("PS_BASELINE: Master Done Loading Checkpoint from {}".format(file_path))
 

@@ -52,14 +52,17 @@ class ByzshieldWorker(DistributedWorker):
         # ~ Ranks of all workers
         self.all_workers = set(range(1, self.world_size))
         
+        self._permute_files = kwargs['permute_files']
+        
         # ~ test
         # if self.rank == 1:
-            # logger.info("DEBUG_W_BYZ: self._group_list: {}".format(self._group_list))
-            # logger.info("DEBUG_W_BYZ: self._group_num: {}".format(self._group_num))
-            # logger.info("DEBUG_W_BYZ: self._group_seeds: {}".format(self._group_seeds))
+            # logger.info("DEBUG_W_BYZ: self._group_list: {} {}".format(self._group_list, type(self._group_list)))
+            # logger.info("DEBUG_W_BYZ: self._group_num: {} {}".format(self._group_num, type(self._group_num)))
+            # logger.info("DEBUG_W_BYZ: self._group_seeds: {} {}".format(self._group_seeds, type(self._group_seeds)))
             # logger.info("DEBUG_W_BYZ: self.ell: {}".format(self.ell))
             # logger.info("DEBUG_W_BYZ: self._err_choice: {}".format(self._err_choice))
             # logger.info("DEBUG_W_BYZ: float_type: {}".format(float_type))
+            # logger.info("DEBUG_W_BYZ: self._permute_files: {}".format(self._permute_files))
 
     def build_model(self):
         # build network
@@ -203,11 +206,16 @@ class ByzshieldWorker(DistributedWorker):
                     
                     # ~ test
                     if self.rank == 1:
-                        logger.info("DEBUG_W_BYZ: cur_step_{}_adversaries, cur_step_honest, cur_step_D: {} {} {}".format(self.cur_step, cur_step_adversaries, cur_step_honest, cur_step_D))
+                        logger.info("W_BYZ: Step {} adversaries, Honest, Disagreement set: {} {} {}".format(self.cur_step, cur_step_adversaries, cur_step_honest, cur_step_D))
                             
                     fetch_weight_start_time = time.time()
                     self.async_fetch_weights_bcast()
                     fetch_weight_duration = time.time() - fetch_weight_start_time
+                    
+                    # ~ test
+                    # Save model at the worker level after it is received from the PS
+                    # for lay,x in enumerate(self.network.parameters()):
+                        # np.save('worker'+str(self.rank)+'_model_layer'+str(lay), x.detach().numpy())
                     
                     # ~ test
                     # for file in self._group_num:
@@ -229,9 +237,9 @@ class ByzshieldWorker(DistributedWorker):
                     
                         # ~ test
                         # if file == 0: # ~ for one file
-                        # np.save('BYZSHIELD_worker_'+str(self.rank)+'_file_'+str(file)+'_X_batch', 
+                        # np.save('BYZSHIELD_file_'+str(file)+'_worker_'+str(self.rank)+'_X_batch', 
                             # X_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1),...].detach().numpy())
-                        # np.save('BYZSHIELD_worker_'+str(self.rank)+'_file_'+str(file)+'_y_batch', 
+                        # np.save('BYZSHIELD_file_'+str(file)+'_worker_'+str(self.rank)+'_y_batch', 
                             # y_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1)].detach().numpy())
                         
                         # ~ Move NN to torch device (CPU or GPU)
@@ -248,6 +256,9 @@ class ByzshieldWorker(DistributedWorker):
                         loss = self.criterion(logits, y_batch[(self.batch_size//self.F)*file:(self.batch_size//self.F)*(file+1)].to(self._device))
                         
                         forward_duration += time.time()-forward_start_time
+                        
+                        # ~ test
+                        # np.save('BYZSHIELD_file_'+str(file)+'_worker_'+str(self.rank)+'_logits', logits.detach().numpy())
                         
                         # ~ test
                         # if self.rank == 1:
@@ -278,14 +289,14 @@ class ByzshieldWorker(DistributedWorker):
                             file_grads = [p.grad.detach().cpu().numpy().astype(float_type) for p in self.network.parameters()]
                         
                         # ~ ASPIS: If caller rank is adversarial, distort the current file if its group is fully adversarial or all its non-adversaries are in the disagreements set
-                        # Disabled if ALIE is enabled
+                        # Disabled if ALIE or FoE is enabled.
                         if self.rank in self._fail_workers[self.cur_step] and self._err_choice == 'fixed_disagreement' and self._lis_simulation != "simulate" and self._err_mode != "foe":
                             
                             # ~ test
                             # logger.info("DEBUG_W_BYZ: FIXED DISAGREEMENT ATTACK")
                             
                             # ~ Group of workers (ranks) processing the current file
-                            group = set(self._group_list[fileInd])
+                            group = set(self._group_list[file])
                             
                             # ~ Set of adversaries in current group
                             cur_group_adversaries = cur_step_adversaries & group
@@ -296,7 +307,6 @@ class ByzshieldWorker(DistributedWorker):
                             # ~ test
                             # if self.rank == 1:
                                 # logger.info("DEBUG_W_BYZ: self._fail_workers[self.cur_step]: {} {}".format(self._fail_workers[self.cur_step], type(self._fail_workers[self.cur_step])))
-                                # logger.info("DEBUG_W_BYZ: A: {} {}".format(A, type(A)))
                                 # logger.info("DEBUG_W_BYZ: group: {} {}".format(group, type(group)))
                                 # logger.info("DEBUG_W_BYZ: group: {} {} {}".format(group, cur_group_adversaries, cur_group_honest))
                                 
@@ -310,6 +320,25 @@ class ByzshieldWorker(DistributedWorker):
                                     # ~ The actual type of distortion will depend on "self._err_mode"
                                     file_grads[i] = err_simulation(file_grads[i], self._err_mode)
                                     
+                        # ~ ASPIS+: If caller rank is adversarial, distort the current file if its group has adversarial majority
+                        # Disabled if ALIE or FoE is enabled.
+                        if self.rank in self._fail_workers[self.cur_step] and self._err_choice == 'only_majorities' and self._lis_simulation != "simulate" and self._err_mode != "foe":
+                            group = set(self._group_list[file])
+                            cur_group_adversaries = cur_step_adversaries & group
+                            cur_group_honest = group - cur_group_adversaries
+                            
+                            # ~ test
+                            # logger.info("DEBUG_W_BYZ: self._fail_workers[self.cur_step]: {}".format(self._fail_workers[self.cur_step]))
+                            # logger.info("DEBUG_W_BYZ: My rank: {}, group: {} {} {}".format(self.rank, group, cur_group_adversaries, cur_group_honest))
+                                
+                                
+                            if len(cur_group_adversaries) > len(cur_group_honest):
+                                # ~ test
+                                # logger.info("DEBUG_W_BYZ: Adversary {} distorts file {}. The adversarial set is: {}".format(self.rank, group, cur_step_adversaries))
+                            
+                                for i in range(len(file_grads)):
+                                    file_grads[i] = err_simulation(file_grads[i], self._err_mode)
+                            
                         # ~ test
                         # if self.rank == 1: logger.info("DEBUG_W_BYZ: file_grads in bytes: {}".format(sum([g.nbytes for g in file_grads])))
 
@@ -341,7 +370,7 @@ class ByzshieldWorker(DistributedWorker):
                                 
                         # ~ test
                         # lay = 0
-                        # if self.cur_step == 2:
+                        # if self.cur_step == 7:
                             # np.save('worker'+str(self.rank)+'_grads_layer'+str(lay)+'_file'+str(file), file_grads[lay])
 
                         # ~ we still pick only the appropriate batch's labels & torch.long() converts to torch.int64
@@ -363,6 +392,14 @@ class ByzshieldWorker(DistributedWorker):
                     if self.cur_step%self._eval_freq == 0 and self.rank==1:
                         #self._save_model(file_path=self._generate_model_path())
                         self._save_model(file_path=self._generate_model_path())
+                        
+                    # ~ Worker receives the permuted file assignments
+                    if self._permute_files == 'yes':
+                        # logger.info("DEBUG_W_BYZ: (BEFORE) Worker rank {}: {} {} {} {} {} {}".format(self.rank, self._group_list, type(self._group_list), self._group_num, type(self._group_num), self._group_seeds, type(self._group_seeds)))
+                        
+                        self.recvPermFromPS()
+                        
+                        # logger.info("DEBUG_W_BYZ: (AFTER) Worker rank {}: {} {} {} {} {} {}".format(self.rank, self._group_list, type(self._group_list), self._group_num, type(self._group_num), self._group_seeds, type(self._group_seeds)))
                         
                     break # ~ breaks here for everyone after one step of training (current batch)
 
@@ -446,3 +483,19 @@ class ByzshieldWorker(DistributedWorker):
                 req_send_check.append(req_isend)
         req_send_check[-1].wait()
     '''
+    
+    
+    # ~ Receive the new file permutation from the PS
+    def recvPermFromPS(self):
+        # ~ Receive self._group_list from the PS
+        self._group_list = self.comm.bcast(self._group_list, root=0)
+
+        # ~ Receive self._group_num from the PS. Use a np.ndarray as a buffer and allocate as much space as the no. of files per worker.
+        # Note: the numpy type MUST match the one at the PS level.
+        group_num_np = np.empty((self.ell,), dtype=np.int32)
+        self.comm.Recv(group_num_np, source=0, tag=9)
+        self._group_num = group_num_np.tolist()
+        
+        # ~ test  
+        # logger.info("DEBUG_PS_BYZ: PERMUTED worker's {} self._group_list: {}".format(self.rank, self._group_list))
+        # logger.info("DEBUG_PS_BYZ: PERMUTED worker's {} self._group_num: {}".format(self.rank, self._group_num))
