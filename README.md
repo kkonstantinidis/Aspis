@@ -1,10 +1,10 @@
 # Aspis/Aspis+
 Aspis's and Aspis+'s robust detection/aggregation ML framework implementation.
 
-This project builds on [ByzShield] and implements the detection and subsequent aggregation of our proposed Aspis and Aspis+ algorithms for robust distributed machine learning. The gradients are assigned to the workers using a subset assignment in the case of Aspis while we use *balanced incomplete block designs* (BIBDs) for the task assignment in Aspis+. We test against the most sophisticated attacks in an omniscient scenario and compare with competing methods; weaker non-adversarial attacks have also been considered.
+This project builds on [ByzShield] and implements the detection and subsequent aggregation of our proposed Aspis and Aspis+ algorithms for robust distributed machine learning. The gradients are assigned to the workers using a subset assignment in the case of Aspis, while we use *balanced incomplete block designs* (BIBDs) for the task assignment in Aspis+. We test against the most sophisticated attacks in an omniscient scenario and compare with competing methods; weaker non-adversarial attacks have also been considered.
 
 # Requirements
-We will be working with Python 2 for the local machine (to execute the bash scripts which configure the remote cluster and initiate training/testing) and with Python 3 for the remote cluster of PS/worker nodes (to execute the actual training/testing). We recommend using an Anaconda (tested with 2020.02) environment in both cases. The local machine would typically be a Linux system (tested with Ubuntu). Below, we have reported the exact version of each module that worked for us, however your mileage may vary.
+We will be working with Python 2 for the local machine (to execute the bash scripts which configure the remote cluster and initiate training/testing) and with Python 3 for the remote cluster of PS/worker nodes (to execute the actual training/testing). We recommend using an Anaconda (tested with 2020.02) environment in both cases. The local machine would typically be a Linux system (tested with Ubuntu). Below, we have reported the exact version of each module that worked for us; however, your mileage may vary.
 
 ## AWS EC2 setup
 This project is intended to be launched on AWS EC2. It also supports local execution (for MNIST) which we won't discuss here but the procedure is very similar (email me if you need instructions for that).
