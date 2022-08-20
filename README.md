@@ -255,7 +255,6 @@ author = {Konstantinos Konstantinidis and Aditya Ramamoorthy},
 year = {2022},
 month = {August},
 url = {https://arxiv.org/abs/2208.08085}}
-}
 ```
 
 
