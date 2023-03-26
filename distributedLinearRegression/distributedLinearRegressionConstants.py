@@ -1,0 +1,10 @@
+# Constants
+REV_GRAD = "rev_grad"
+CONSTANT = "constant"
+ALIE = "alie"
+BASELINE = "baseline"
+DETOX = "detox"
+ASPIS = "aspis"
+ASPIS_PLUS = "aspis_plus"
+GEOMETRIC_MEDIAN = "geometric_median"
+COORD_MEDIAN = "coord-median"
