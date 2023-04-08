@@ -6,7 +6,7 @@ import sys
 from distributedLinearRegression import *
 
 # Maximum number of iterations of linear regression
-max_iterations = 1000
+max_iterations = 2000
 
 # Size of data set
 # n = 1000
@@ -32,14 +32,15 @@ randomByzantines = False
 
 # Reversed gradient and constant distortion are supported
 # err_mode = REV_GRAD
-err_mode = CONSTANT
-# err_mode = ALIE
+# err_mode = CONSTANT
+err_mode = ALIE
 
 # 2nd level of aggregation
 # mode = COORD_MEDIAN
 mode = GEOMETRIC_MEDIAN
 
 # Which scheme to use
+# SOS: Only ATT-2 is supported for Aspis
 # approach = BASELINE
 # approach = DETOX
 # approach = ASPIS
@@ -49,7 +50,7 @@ mode = GEOMETRIC_MEDIAN
 # alpha = 0.001
 
 # Tolerance of linear regression for termination criterion
-epsilon = 0.00001
+epsilon = 0.0000000001
 
 # Constant for Tikhonov regularization of the loss (ridge regression)
 # zeta = 100
@@ -62,8 +63,10 @@ det_win_length = 15
 permute_files = False
 
 # Random seed for the entire algorithm
-seed = 428
-# seed = None
+# - If only one seed, it will run a single experiment.
+# - If multiple seeds it will run Monte Carlo simulations.
+seeds = [0]
+# seeds = list(range(100))
 
 # Whether to write log to file or not
 # logToFile = False
@@ -88,65 +91,82 @@ if randomByzantines:
 # Folder to store logs
 ROOT_LOG_FOLDER = "./Tuning Logs"
 
-for approach in [BASELINE]:
-    for q in [6]:
-        for n in [500]:
+for approach in [DETOX]:
+    for q in [4]:
+        for n in [1000]:
             for d in [100]:
-                fig, ax = plt.subplots()
-                lossLines = []
-                figName = "approach={},n={},d={},K={},q={},r={},randomByzantines={},err_mode={},mode={},epsilon={},adversary_const={}" \
-                    .format(approach, n, d, K, q, r, randomByzantines, err_mode, mode, epsilon, adversary_const)
-                legends = []
+                for seed in seeds:  # use for Monte Carlo simulations - Use the same seed(s) for all schemes
+                    fig, ax = plt.subplots()
+                    lossLines = []
+                    figName = "{},n={},d={},K={},q={},r={},randomByz={},err_mode={},{},epsilon={},adversary_const={}" \
+                        .format(approach, n, d, K, q, r, randomByzantines, err_mode, mode, epsilon, adversary_const)
 
-                if logToFile:
-                    orig_stdout = sys.stdout
+                    # Monte Carlo
+                    if len(seeds) > 1:
+                        figName += "_MC"
 
-                    # Create folder for storing log and loss of current experiment
-                    directory = ROOT_LOG_FOLDER + "/Logs_" + figName
-                    if not os.path.exists(directory):
-                        os.mkdir(directory)
+                    legends = []
 
-                    # Append to previous logs, if any
-                    file_log = open(ROOT_LOG_FOLDER + "/Logs_" + figName + "/log.txt", 'a+')
-                    sys.stdout = file_log
+                    if logToFile:
+                        orig_stdout = sys.stdout
 
-                # General setup: alpha: [5, 1, 0.5, 0.1, 0.01, 0.001, 0.0001], zeta: [0.1, 0.01, 0.001, 0.0001, 0]
-                for alpha in [0.0001]:
-                    for zeta in [0, 1]:
-                        try:
-                            loss, iterIdx = run(max_iterations, n, d, K, q, adv_win_length, r, randomByzantines, err_mode, mode, approach, alpha,
-                                                epsilon, zeta, det_win_length, permute_files, seed, logToFile, pointFreq, adversary_const)
-                        except ZeroDivisionError:
-                            print("Error! Aborting due to ZeroDivisionError...\n")
-                            continue
-                        except RuntimeWarning:
-                            print("Error! Aborting due to RuntimeWarning...\n")
-                            continue
+                        # Create folder for storing log and loss of current experiment
+                        directory = ROOT_LOG_FOLDER + "/Logs_" + figName
+                        if not os.path.exists(directory):
+                            os.mkdir(directory)
 
-                        # Write the loss for this experiment in a file.
-                        # Overwrite previous file, if any.
-                        if logToFile:
-                            file_loss = open(ROOT_LOG_FOLDER + "/Logs_" + figName + "/loss_" + "alpha_" + str(alpha) + "_zeta_" + str(zeta) + ".txt", 'w')
-                            file_loss.write("loss = [" + ",".join(str(x) for x in loss) + "]")
-                            file_loss.close()
+                        # Append to previous logs, if any
+                        file_log = open(ROOT_LOG_FOLDER + "/Logs_" + figName + "/log.txt", 'a+')
+                        sys.stdout = file_log
 
-                        # Add the loss to the plot
-                        # curLossLine, = plt.plot(iterIdx, loss)
-                        curLossLine, = plt.semilogy(iterIdx, loss)
-                        lossLines += [curLossLine]
-                        legends += ["alpha={},zeta={}".format(alpha, zeta)]
+                    # General setup: alpha: [5, 1, 0.5, 0.1, 0.01, 0.001, 0.0001, 0.00001], zeta: [0.1, 0.01, 0.001, 0.0001, 0]
+                    for alpha in [1, 0.5, 0.1, 0.01, 0.001, 0.0001, 0.00001, 0.000001, 0.0000001]:
+                        for zeta in [0.1, 0.01, 0.001, 0.0001, 0]:
+                            try:
+                                loss, iterIdx = run(max_iterations, n, d, K, q, adv_win_length, r, randomByzantines, err_mode, mode, approach, alpha,
+                                                    epsilon, zeta, det_win_length, permute_files, seed, logToFile, pointFreq, adversary_const)
+                            except ZeroDivisionError:
+                                print("Error! Aborting due to ZeroDivisionError...\n")
+                                continue
+                            except RuntimeWarning:
+                                print("Error! Aborting due to RuntimeWarning...\n")
+                                continue
 
-                ax.set_title(figName)
-                ax.set_xlabel("Iteration")
-                ax.set_ylabel("Loss")
-                plt.legend(lossLines, legends)
+                            # Write the loss for this experiment in a file.
+                            # Overwrite previous file, if any.
+                            if logToFile:
+                                logFileName = ROOT_LOG_FOLDER + "/Logs_" + figName + "/loss_" + "alpha_" + str(alpha) + "_zeta_" + str(zeta)
 
-                # Option 1
-                # plt.show()
+                                # Append seed if Monte Carlo simulations
+                                if len(seeds) > 1:
+                                    logFileName += "_seed_" + str(seed)
 
-                # ...or Option 2
-                # plt.savefig("./Figures/" + figName)
+                                logFileName += ".txt"
 
-                if logToFile:
-                    sys.stdout = orig_stdout
-                    file_log.close()
+                                file_loss = open(logFileName, 'w')
+                                file_loss.write("loss = [" + ",".join(str(x) for x in loss) + "]")
+                                file_loss.close()
+
+                            # Add the loss to the plot for non-Monte Carlo simulations
+                            if len(seeds) == 1:
+                                # curLossLine, = plt.plot(iterIdx, loss)
+                                curLossLine, = plt.semilogy(iterIdx, loss)
+                                lossLines += [curLossLine]
+                                legends += ["alpha={},zeta={}".format(alpha, zeta)]
+
+                    # Plot or save figure only for non-Monte Carlo simulations
+                    if len(seeds) == 1:
+                        ax.set_title(figName)
+                        ax.set_xlabel("Iteration")
+                        ax.set_ylabel("Loss")
+                        plt.legend(lossLines, legends)
+
+                        # Option 1
+                        # plt.show()
+
+                        # ...or Option 2
+                        # plt.savefig("./Figures/" + figName + "_seed_" + str(seed))
+
+                    if logToFile:
+                        sys.stdout = orig_stdout
+                        file_log.close()

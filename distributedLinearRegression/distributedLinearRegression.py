@@ -60,14 +60,33 @@ def shouldDistort(approach, file, A, D):
         # Distort the current file if its group has adversarial majority
         return len(cur_group_adversaries) > len(cur_group_honest)
 
-def distortGradient(g: Any, err_mode: str, adversary_const: int):
+# Computes the mean and standard deviation across all gradients across all files
+def allGradsMuSigma(fileGrads: dict, d: int):
+    # Collect all gradients for all files in a list
+    tempt_grads = []
+    for fileInd in fileGrads:
+        tempt_grads.extend(fileGrads[fileInd])
+
+    mu, sigma = np.mean(tempt_grads, axis=0), np.std(tempt_grads, axis=0)
+
+    assert mu.shape == (d, 1), "Invalid gradient dimensions!"
+    assert sigma.shape == (d, 1), "Invalid gradient dimensions!"
+
+    return mu, sigma
+
+def distortGradient(g: Any, err_mode: str, adversary_const: int, mu: Any = None, sigma: Any = None):
     if err_mode == REV_GRAD:
         # Reversed gradient distortion
         return -adversary_const*g
     elif err_mode == CONSTANT:
         # Constant distortion
         return -adversary_const*np.ones(g.shape)
-        # return -100*np.ones(g.shape, dtype=float_type)
+    elif err_mode == ALIE:
+        # ALIE distortion
+        assert mu is not None, "Error! ALIE mu is None!"
+        assert sigma is not None, "Error! ALIE sigma is None!"
+        __z = 1.0
+        return mu + __z * sigma
     else:
         assert 0 == 1, "This err_mode is not supported"
 
@@ -182,7 +201,7 @@ def _attempt_degree_detection(K, i, det_win_length, agreements, detectedWorkers,
                 if worker in detectedWorkers:
                     fileGrads[fileInd][file.index(worker)] = copy.deepcopy(cleanGroupGradient)
 
-    # print("DEBUG_PS_BYZ: degree-detectedWorkers: {}".format(detectedWorkers))
+    # print("Aspis+: Degree-detected Byzantines: {}, Actual Byzantines: {}".format(detectedWorkers, A))
 
     return agreements, detectedWorkers, fileGrads
 #######################################################################################################################
@@ -302,25 +321,25 @@ def run(max_iterations: int,
 
         # Available designs
         if K == 9:
-            df = pandas.read_excel('bibd_9_3_1.xlsx', header = None)
+            df = pandas.read_excel('../bibd_9_3_1.xlsx', header = None)
             pair_groups = 1
         elif K == 10:
-            df = pandas.read_excel('bibd_10_3_2.xlsx', header = None)
+            df = pandas.read_excel('../bibd_10_3_2.xlsx', header = None)
             pair_groups = 2
         elif K == 15:
-            df = pandas.read_excel('bibd_15_3_1.xlsx', header=None) # STS(15)
+            df = pandas.read_excel('../bibd_15_3_1.xlsx', header=None) # STS(15)
             pair_groups = 1
         elif K == 16:
-            df = pandas.read_excel('bibd_16_3_2.xlsx', header = None)
+            df = pandas.read_excel('../bibd_16_3_2.xlsx', header = None)
             pair_groups = 2
         elif K == 21:
-            df = pandas.read_excel('bibd_21_3_1.xlsx', header=None) # STS(21)
+            df = pandas.read_excel('../bibd_21_3_1.xlsx', header=None) # STS(21)
             pair_groups = 1
         elif K == 25:
-            df = pandas.read_excel('bibd_25_3_1.xlsx', header=None) # STS(25)
+            df = pandas.read_excel('../bibd_25_3_1.xlsx', header=None) # STS(25)
             pair_groups = 1
         elif K == 7:
-            df = pandas.read_excel('fano_plane.xlsx', header = None)
+            df = pandas.read_excel('../fano_plane.xlsx', header = None)
             pair_groups = 1
         else:
             assert 0 == 1, "Error! No known design for Aspis+ for this choice of K."
@@ -361,7 +380,7 @@ def run(max_iterations: int,
     # Linear regression using distributed gradient descent
     #######################################################################################################################
 
-    # Data points: n x (d+1)
+    # Data points: n x d
     X = np.random.normal(0, 1, size = (n,d))
 
     # Actual model
@@ -417,12 +436,29 @@ def run(max_iterations: int,
                 # Linear regression closed-form gradient (Tikhonov regularization)
                 grad = np.matmul(np.matmul(np.transpose(Xsplit[fileInd]), Xsplit[fileInd]), wt) - np.matmul(np.transpose(Xsplit[fileInd]), ysplit[fileInd]) + np.multiply(zeta, wt)
                 # grad = np.matmul(np.matmul(np.transpose(Xsplit[fileInd]), Xsplit[fileInd]), wt) - np.matmul(np.transpose(Xsplit[fileInd]), ysplit[fileInd])
-                if worker in A:
+
+                # Reversed gradient or constant distortion.
+                # ALIE distortion needs knowledge of mean and standard deviation of all gradients so it cannot (and should not, for optimality reasons) be done in this loop.
+                if err_mode != ALIE and worker in A:
                     if shouldDistort(approach, files[fileInd], A, D):
                         # Distort gradient
                         grad = distortGradient(grad, err_mode, adversary_const)
 
                 fileGrads[fileInd][files[fileInd].index(worker)] = copy.deepcopy(grad)
+
+        # For ALIE, compute the mean and standard deviation across all gradients across all files.
+        # Then, distort the gradients, as necessary.
+        if err_mode == ALIE:
+            allGrads_mu, allGrads_sigma = allGradsMuSigma(fileGrads, d)
+
+            # Distort gradient - No need to provide actual gradient as the distorted value depends only on mean and standard deviation.
+            ALIE_grad = distortGradient(None, err_mode, adversary_const, allGrads_mu, allGrads_sigma)
+            assert ALIE_grad.shape == (d, 1), "Invalid gradient dimensions!"
+
+            for worker in range(1, K+1):
+                for fileInd in workerFiles[worker]:
+                    if worker in A and shouldDistort(approach, files[fileInd], A, D):
+                        fileGrads[fileInd][files[fileInd].index(worker)] = copy.deepcopy(ALIE_grad)
 
         # Majority vote
         # Key: File index (0-indexed), Value: majority vote gradient for the file of dimension a x n
@@ -451,8 +487,7 @@ def run(max_iterations: int,
 
         # Assert gradient dimensions
         for fileInd in range(f):
-            assert fileMajGrad[fileInd].shape[0] == d, "Invalid gradient dimensions!"
-            assert fileMajGrad[fileInd].shape[1] == 1, "Invalid gradient dimensions!"
+            assert fileMajGrad[fileInd].shape == (d, 1), "Invalid gradient dimensions!"
         ###################################################################################################################
 
         ###################################################################################################################
@@ -466,8 +501,7 @@ def run(max_iterations: int,
             assert 0 == 1, "Invalid mode!"
 
         # Assert gradient dimensions
-        assert finalGrad.shape[0] == d, "Invalid gradient dimensions!"
-        assert finalGrad.shape[1] == 1, "Invalid gradient dimensions!"
+        assert finalGrad.shape == (d, 1), "Invalid gradient dimensions!"
         ###################################################################################################################
 
         ###################################################################################################################
@@ -494,7 +528,12 @@ def run(max_iterations: int,
         # All approaches support random choice of Byzantines at windows of fixed length
         if randomByzantines and i%adv_win_length == 0:
             A = set(generateRandomByzantines(K, q))
-            print("Iteration: {}, New set of Byzantines: {}".format(i, A))
+
+            # Change the set of honest workers, D, with whom the adversaries disagree for Aspis
+            H = list(W - set(A))
+            D = H[:q]
+
+            print("Iteration: {}, New set of Byzantines: {}, New D for Aspis (if applicable): {}".format(i, A, D))
 
         # Done
         if np.linalg.norm(finalGrad) < epsilon or i == max_iterations: break
