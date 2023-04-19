@@ -14,8 +14,9 @@ import time
 from typing import Any
 from datetime import datetime
 import pytz
+import networkx as nx
 
-from distributedLinearRegressionConstants import REV_GRAD, CONSTANT, ALIE, BASELINE, DETOX, ASPIS, ASPIS_PLUS, GEOMETRIC_MEDIAN, COORD_MEDIAN
+from distributedLinearRegressionConstants import REV_GRAD, CONSTANT, ALIE, BASELINE, DETOX, ASPIS, ASPIS_PLUS, GEOMETRIC_MEDIAN, COORD_MEDIAN, FIXED_DISAGREEMENT, ALL, HONEST_WORKERS_DISAGREE
 
 #######################################################################################################################
 # Helper functions
@@ -31,25 +32,31 @@ def ncr(n, r):
 def generateRandomByzantines(K, q):
     return random.sample(range(1,K+1), q)
 
-def shouldDistort(approach, file, A, D):
+def shouldDistort(approach, file, A, D, err_choice):
     if approach in [BASELINE, DETOX]:
         # Distort since worker is adversarial
         return True
 
     elif approach == ASPIS:
-        # Attack ATT-2 on Aspis
+        if err_choice == ALL:
+            # Attack ATT-1 on Aspis
+            return True
+        elif err_choice == FIXED_DISAGREEMENT:
+            # Attack ATT-2 on Aspis
 
-        # Group of workers processing the current file
-        group = set(file)
+            # Group of workers processing the current file
+            group = set(file)
 
-        # Set of adversaries in current group
-        cur_group_adversaries = set(A) & group
+            # Set of adversaries in current group
+            cur_group_adversaries = set(A) & group
 
-        # Set of non-adversaries in current group
-        cur_group_honest = group - cur_group_adversaries
+            # Set of non-adversaries in current group
+            cur_group_honest = group - cur_group_adversaries
 
-        # If either the group is fully adversarial (cur_group_honest == set()) or its non-adversaries are in the "disagreement set", the adversary chooses to distort.
-        return cur_group_honest.issubset(D)
+            # If either the group is fully adversarial (cur_group_honest == set()) or its non-adversaries are in the "disagreement set", the adversary chooses to distort.
+            return cur_group_honest.issubset(D)
+        else:
+            assert 0 == 1, "Invalid Aspis error choice!"
 
     elif approach == ASPIS_PLUS:
         # Attack ATT-3 on Aspis+
@@ -128,6 +135,97 @@ def permuteFiles(K, files, workerFiles):
     workerFiles = newWorkerFiles
     return files, workerFiles
 
+# Aspis: Adversarial detection using clique-finding
+# See byzshield_master.py
+def _attempt_clique_detection(K, files, fileGrads, A, pair_groups, r):
+    agreements = Counter()
+
+    for fileInd, file in enumerate(files):
+        for worker1, worker2 in product(file, file):
+            if worker1 >= worker2: continue
+
+            worker1_grad = fileGrads[fileInd][file.index(worker1)]
+            worker2_grad = fileGrads[fileInd][file.index(worker2)]
+
+            agreement = True
+
+            if not np.array_equal(worker1_grad, worker2_grad):
+                agreement = False
+
+                if worker1 not in A and worker2 not in A:
+                    assert 0 == 1, HONEST_WORKERS_DISAGREE
+
+            if agreement: agreements[tuple([worker1, worker2])] += 1
+
+    G = nx.Graph()
+    G.add_nodes_from(range(1, K+1))
+
+    for worker1 in range(1, K+1):
+        for worker2 in range(worker1+1, K+1):
+            if agreements[(worker1, worker2)] == pair_groups:
+                G.add_edge(worker1, worker2)
+
+    C_vec = list(nx.clique.find_cliques(G))
+
+    cliqueNum = float('-inf')
+
+    maxCliques = set()
+    for C in C_vec:
+        if len(C) > cliqueNum:
+            cliqueNum = len(C)
+            maxCliques = {tuple(C)}
+        elif len(C) == cliqueNum:
+            maxCliques.add(tuple(C))
+
+    # print("DEBUG_PS_BYZ: maxCliques: {}".format(maxCliques))
+
+    detectedWorkers = set()
+    fullyDistortedFiles = []
+    if len(maxCliques) == 1:
+        for C in maxCliques: break
+        for worker in range(1, K+1):
+            if worker not in C:
+                detectedWorkers.add(worker)
+
+        cleanGradient = None
+        for fileInd, file in enumerate(files):
+            for worker in file:
+                if worker not in detectedWorkers:
+                    cleanGradient = fileGrads[fileInd][file.index(worker)]
+                    break
+
+            if cleanGradient is not None: break
+
+        for fileInd, file in enumerate(files):
+            if len(set(file) & set(detectedWorkers)) == 0:
+                # Un-distorted group
+                continue
+            elif len(set(file) & set(detectedWorkers)) == r:
+                # Fully distorted group
+                for worker in file:
+                    fileGrads[fileInd][file.index(worker)] = copy.deepcopy(cleanGradient)
+
+                # print("DEBUG_PS_BYZ: Fully adversarial file: {}".format(file))
+
+                fullyDistortedFiles += [fileInd]
+
+            else:
+                # Partially distorted group
+                cleanGroupGradient = None
+                for worker in file:
+                    if worker not in detectedWorkers:
+                        cleanGroupGradient = fileGrads[fileInd][file.index(worker)]
+                        break
+
+                for worker in file:
+                    if worker in detectedWorkers:
+                        fileGrads[fileInd][file.index(worker)] = copy.deepcopy(cleanGroupGradient)
+
+    print("Aspis: Clique-detected Byzantines: {}, Actual Byzantines: {}".format(detectedWorkers, A))
+
+    return fileGrads, fullyDistortedFiles
+
+
 # Aspis+: Adversarial detection using degree-based argument
 # See byzshield_master.py
 def _attempt_degree_detection(K, i, det_win_length, agreements, detectedWorkers, files, fileGrads, A, q, pair_groups, r):
@@ -149,7 +247,7 @@ def _attempt_degree_detection(K, i, det_win_length, agreements, detectedWorkers,
                 agreement = False
 
                 if worker1 not in A and worker2 not in A:
-                    assert 0 == 1, "Error! Honest workers disagree. Check for precision issues."
+                    assert 0 == 1, HONEST_WORKERS_DISAGREE
 
             if agreement: agreements[tuple([worker1, worker2])] += 1
 
@@ -181,6 +279,8 @@ def _attempt_degree_detection(K, i, det_win_length, agreements, detectedWorkers,
 
         if cleanGradient is not None: break
 
+    fullyDistortedFiles = []
+
     for fileInd, file in enumerate(files):
         if len(set(file) & set(detectedWorkers)) == 0:
             # Un-distorted group
@@ -189,6 +289,10 @@ def _attempt_degree_detection(K, i, det_win_length, agreements, detectedWorkers,
             # Fully distorted group
             for worker in file:
                 fileGrads[fileInd][file.index(worker)] = copy.deepcopy(cleanGradient)
+
+            # print("DEBUG_PS_BYZ: Fully adversarial file: {}".format(file))
+
+            fullyDistortedFiles += [fileInd]
         else:
             # Partially distorted group
             cleanGroupGradient = None
@@ -201,9 +305,15 @@ def _attempt_degree_detection(K, i, det_win_length, agreements, detectedWorkers,
                 if worker in detectedWorkers:
                     fileGrads[fileInd][file.index(worker)] = copy.deepcopy(cleanGroupGradient)
 
-    # print("Aspis+: Degree-detected Byzantines: {}, Actual Byzantines: {}".format(detectedWorkers, A))
+    print("Aspis+: Degree-detected Byzantines: {}, Actual Byzantines: {}".format(detectedWorkers, A))
 
-    return agreements, detectedWorkers, fileGrads
+    return agreements, detectedWorkers, fileGrads, fullyDistortedFiles
+
+
+# Computes the closed-form expression of the linear regression loss
+def linRegLoss(n: int, X: np.ndarray, y: np.ndarray, w: np.ndarray, zeta: float):
+    return (1/n * 0.5 * (np.matmul(np.transpose(y - np.matmul(X, w)), y - np.matmul(X, w)) + zeta*np.linalg.norm(w))).item()
+
 #######################################################################################################################
 
 #######################################################################################################################
@@ -218,6 +328,7 @@ def run(max_iterations: int,
         r: int,
         randomByzantines: bool,
         err_mode: str,
+        err_choice: str,
         mode: str,
         approach: str,
         alpha: float,
@@ -228,13 +339,14 @@ def run(max_iterations: int,
         seed: int,
         logToFile: bool,
         pointFreq: int,
-        adversary_const: int):
+        adversary_const: int,
+        backtrackLS: bool):
     #######################################################################################################################
     # Task assignment and choice of Byzantines
     #######################################################################################################################
 
     assert r%2 and 3 <= r <= K, "Invalid r"
-    assert q < K/2, "Too many adversaries"
+    assert q < K/2, "Too many adversaries!"
     # assert q >= (r+1)/2, "Too few adversaries"
     assert K%r == 0, "DETOX requires r|K"
 
@@ -298,6 +410,10 @@ def run(max_iterations: int,
 
     elif approach == ASPIS:
         # Aspis
+
+        # Subset assignment: each pair of workers participates into (K-2) choose (r-2) groups
+        pair_groups = ncr(K-2, r-2)
+
         files = list(list(x) for x in itertools.combinations(W, r))
 
         if randomByzantines:
@@ -383,6 +499,17 @@ def run(max_iterations: int,
     # Data points: n x d
     X = np.random.normal(0, 1, size = (n,d))
 
+    # Compute the spectral norm of X^TX (maximum singular value). If it is L, then gradient descent is guaranteed to converge
+    # provided that the learning rate is less than 1/L.
+    _, sing, _ = np.linalg.svd(np.matmul(np.transpose(X), X))
+    print("The spectral norm of X^TX is {}".format(sing[0]))
+
+    # Compute the eigenvalues of X^TX (should be the same as the singular values as it is psd) and sort in descending order.
+    # If l,L are the min and max eigenvalues, then the optimal learning rate is 2/(l + L).
+    eig, _ = np.linalg.eig(np.matmul(np.transpose(X), X))
+    eig = np.flip(np.sort(eig))
+    print("Min eigenvalue of X^TX: {}, Max eigenvalue of X^TX: {}, Optimal learning rate: {}".format(min(eig), max(eig), 2/(min(eig) + max(eig))))
+
     # Actual model
     w = np.random.normal(0, 1, size = (d,1))
 
@@ -416,6 +543,7 @@ def run(max_iterations: int,
 
     # Distributed full gradient descent for linear regression
     i = 0
+    prevLoss = None # loss of previous iteration
     while 1:
         # File gradients
         # Key: File index (0-indexed), Value: list of gradients of the workers assigned to the file
@@ -440,7 +568,7 @@ def run(max_iterations: int,
                 # Reversed gradient or constant distortion.
                 # ALIE distortion needs knowledge of mean and standard deviation of all gradients so it cannot (and should not, for optimality reasons) be done in this loop.
                 if err_mode != ALIE and worker in A:
-                    if shouldDistort(approach, files[fileInd], A, D):
+                    if shouldDistort(approach, files[fileInd], A, D, err_choice):
                         # Distort gradient
                         grad = distortGradient(grad, err_mode, adversary_const)
 
@@ -457,7 +585,7 @@ def run(max_iterations: int,
 
             for worker in range(1, K+1):
                 for fileInd in workerFiles[worker]:
-                    if worker in A and shouldDistort(approach, files[fileInd], A, D):
+                    if worker in A and shouldDistort(approach, files[fileInd], A, D, err_choice):
                         fileGrads[fileInd][files[fileInd].index(worker)] = copy.deepcopy(ALIE_grad)
 
         # Majority vote
@@ -465,9 +593,12 @@ def run(max_iterations: int,
         # where a depends on whether the split is exact or not but roughly it is (d+1)/f
         fileMajGrad = {}
 
-        # Aspis+ detection
-        if approach == ASPIS_PLUS:
-            agreements, detectedWorkers, fileGrads =  _attempt_degree_detection(K, i, det_win_length, agreements, detectedWorkers, files, fileGrads, A, q, pair_groups, r)
+        # Aspis/Aspis+ detection
+        fullyDistortedFiles = []
+        if approach == ASPIS:
+            fileGrads, fullyDistortedFiles = _attempt_clique_detection(K, files, fileGrads, A, pair_groups, r)
+        elif approach == ASPIS_PLUS:
+            agreements, detectedWorkers, fileGrads, fullyDistortedFiles =  _attempt_degree_detection(K, i, det_win_length, agreements, detectedWorkers, files, fileGrads, A, q, pair_groups, r)
 
         ###################################################################################################################
         # 1st level of aggregation
@@ -488,15 +619,26 @@ def run(max_iterations: int,
         # Assert gradient dimensions
         for fileInd in range(f):
             assert fileMajGrad[fileInd].shape == (d, 1), "Invalid gradient dimensions!"
+
+        # Throw away all fully distorted files after detection (optional).
+        if approach == ASPIS or approach == ASPIS_PLUS:
+            for fileInd in fullyDistortedFiles:
+                del fileMajGrad[fileInd]
+
+        # No. of remaining files after removing fully distorted files
+        filteredFilesIdx = set(range(f)) - set(fullyDistortedFiles)
+
+        assert len(fileMajGrad) == len(filteredFilesIdx), "Invalid number of files after filtering!"
+
         ###################################################################################################################
 
         ###################################################################################################################
         # 2nd level of aggregation
         finalGrad = None
         if mode == COORD_MEDIAN:
-            finalGrad = np.median(np.array([fileMajGrad[fileInd] for fileInd in range(f)]), axis = 0)
+            finalGrad = np.median(np.array([fileMajGrad[fileInd] for fileInd in filteredFilesIdx]), axis = 0)
         elif mode == GEOMETRIC_MEDIAN:
-            finalGrad = compute_geometric_median([fileMajGrad[fileInd] for fileInd in range(f)]).median
+            finalGrad = compute_geometric_median([fileMajGrad[fileInd] for fileInd in filteredFilesIdx]).median
         else:
             assert 0 == 1, "Invalid mode!"
 
@@ -504,19 +646,50 @@ def run(max_iterations: int,
         assert finalGrad.shape == (d, 1), "Invalid gradient dimensions!"
         ###################################################################################################################
 
+        # The first order Taylor approximation of a function (in this case the loss) around the current point wt is:
+        #   f(wt + Dw) ~= f(wt) + Dw*(gradient of l w.r.t. wt)
+        # So, gradient descent effectively chooses Dx to align with -alpha*(gradient of l() w.r.t. wt) for some learning rate alpha.
+        # In this computation, the PS does not know the true gradient so we want to see whether the estimated gradient points to the same
+        # direction as the true gradient, i.e., estimated Dw has positive inner product with the true gradient.
+        trueGrad = np.matmul(np.matmul(np.transpose(X), X), wt) - np.matmul(np.transpose(X), y)
+        if np.inner(np.squeeze(trueGrad), np.squeeze(finalGrad)) < 0:
+            print("  ", "Warning: Estimated gradient direction is not a descent direction!")
+
+        ###################################################################################################################
+        # Backtracking line search to find optimal learning rated based on true gradient.
+        # https://en.wikipedia.org/wiki/Backtracking_line_search
+        usedAlpha = alpha
+        if backtrackLS:
+            # Parameters of the algorithm
+            tau = 0.5
+            c = 0.5
+            REM_SEARCHES = 1000
+            t = -c*np.inner(np.squeeze(trueGrad), np.squeeze(finalGrad))
+            while linRegLoss(n, X, y, wt, zeta) - linRegLoss(n, X, y, wt + usedAlpha*finalGrad, zeta) >= usedAlpha*t and REM_SEARCHES > 0:
+                usedAlpha = tau*usedAlpha
+                REM_SEARCHES -= 1
+
+            print("  ", "Backtracking linear search learning rate: {}".format(usedAlpha))
+        ###################################################################################################################
+
         ###################################################################################################################
         # Update model
-        wt = wt - alpha*finalGrad
+        wt = wt - usedAlpha*finalGrad
         ###################################################################################################################
 
         # Compute loss and print stats
+        curLoss = (1/n * 0.5 * (np.matmul(np.transpose(y - np.matmul(X, wt)), y - np.matmul(X, wt)) + zeta*np.linalg.norm(wt))).item()
         if i % pointFreq == 0:
-            loss += [(1/n * 0.5 * (np.matmul(np.transpose(y - np.matmul(X, wt)), y - np.matmul(X, wt)) + zeta*np.linalg.norm(wt))).item()]
-            # loss += [(1/n * 0.5 * (np.matmul(np.transpose(y - np.matmul(X, wt)), y - np.matmul(X, wt)))).item()]
-
+            loss += [curLoss]
             iterIdx += [i]
 
-            print("Iteration:", i, ", Loss:", loss[-1], ", |w|:", np.linalg.norm(wt))
+            print("Iteration:", i, ", Loss:", loss[-1], ", |finalGrad|:", np.linalg.norm(finalGrad))
+
+        # For convex problems, loss should be monotonically decreasing
+        if prevLoss is not None and curLoss > prevLoss:
+            print("  ", "Warning: Loss {} increased from previous iteration's {}".format(curLoss, prevLoss))
+
+        prevLoss = curLoss
 
         i += 1
 

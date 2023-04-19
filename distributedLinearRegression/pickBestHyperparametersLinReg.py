@@ -18,7 +18,7 @@ ROOT_LOG_FOLDER = "./Tuning Logs"
 # ROOT_LOG_FOLDER = "./Final Logs"
 
 # Input folder within current directory
-PATH = ROOT_LOG_FOLDER + r"/Logs_aspis,n=1000,d=100,K=15,q=4,r=3,randomByz=False,err_mode=alie,geometric_median,epsilon=1e-10,adversary_const=10"
+PATH = ROOT_LOG_FOLDER + r"/Logs_aspis_plus,n=1000,d=100,K=15,q=4,r=3,randomByz=True,err_mode=constant,err_choice=all,geometric_median,epsilon=1e-10,adversary_const=10"
 
 # How many checkpoints from the end will be used to evaluate tuning (will take their average)
 # Note: lastN <= no. of checkpoints. If not, it will use all checkpoints.

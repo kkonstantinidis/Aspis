@@ -16,7 +16,7 @@ ROOT_LOG_FOLDER = "./Final Logs"
 # ROOT_LOG_FOLDER = "./Tuning Logs"
 
 # Input folder within current directory
-PATH = ROOT_LOG_FOLDER + r"/LR-F-D7/Logs_detox,n=1000,d=100,K=15,q=6,r=3,randomByz=False,err_mode=constant,geometric_median,epsilon=1e-10,adversary_const=10_MC"
+PATH = ROOT_LOG_FOLDER + r"/LR-F-A15/Logs_aspis_plus,n=1000,d=100,K=15,q=6,r=3,randomByz=True,err_mode=constant,err_choice=all,geometric_median,epsilon=1e-10,adversary_const=10_MC"
 
 # Trainings whose terminating loss exceeds this value will be ignored
 MAX_LOSS = 0.1

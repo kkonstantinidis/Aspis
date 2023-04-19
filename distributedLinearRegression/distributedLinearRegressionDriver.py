@@ -35,6 +35,12 @@ randomByzantines = False
 # err_mode = CONSTANT
 err_mode = ALIE
 
+# How adversaries decide which files to distort - only used in Aspis as Baseline & DETOX distort all files and Aspis+ distorts only majorities.
+# 1. ALL: all adversaries distort all files.
+# 2. FIXED_DISAGREEMENT: all q adversaries disagree with a fixed set of honest workers.
+err_choice = FIXED_DISAGREEMENT
+# err_choice = ALL
+
 # 2nd level of aggregation
 # mode = COORD_MEDIAN
 mode = GEOMETRIC_MEDIAN
@@ -78,6 +84,12 @@ pointFreq = 10
 # Constant to use in reversed gradient and constant attack as multiplier
 adversary_const = 10
 
+# Whether to use backtracking line search to optimize learning rate at the PS.
+# ONLY FOR DEBUGGING - REQUIRES KNOWLEDGE OF THE TRUE GRADIENT.
+# https://en.wikipedia.org/wiki/Backtracking_line_search
+backtrackLS = False
+# backtrackLS = True
+
 # raw_input returns the empty string for "Enter"
 if randomByzantines:
     yes = {'yes','y', 'ye', ''}
@@ -98,8 +110,8 @@ for approach in [DETOX]:
                 for seed in seeds:  # use for Monte Carlo simulations - Use the same seed(s) for all schemes
                     fig, ax = plt.subplots()
                     lossLines = []
-                    figName = "{},n={},d={},K={},q={},r={},randomByz={},err_mode={},{},epsilon={},adversary_const={}" \
-                        .format(approach, n, d, K, q, r, randomByzantines, err_mode, mode, epsilon, adversary_const)
+                    figName = "{},n={},d={},K={},q={},r={},randomByz={},err_mode={},err_choice={},{},epsilon={},adversary_const={},backtrackLS={}" \
+                        .format(approach, n, d, K, q, r, randomByzantines, err_mode, err_choice, mode, epsilon, adversary_const, backtrackLS)
 
                     # Monte Carlo
                     if len(seeds) > 1:
@@ -120,17 +132,23 @@ for approach in [DETOX]:
                         sys.stdout = file_log
 
                     # General setup: alpha: [5, 1, 0.5, 0.1, 0.01, 0.001, 0.0001, 0.00001], zeta: [0.1, 0.01, 0.001, 0.0001, 0]
-                    for alpha in [1, 0.5, 0.1, 0.01, 0.001, 0.0001, 0.00001, 0.000001, 0.0000001]:
-                        for zeta in [0.1, 0.01, 0.001, 0.0001, 0]:
+                    for alpha in [0.0001, 0.00001, 0.000001]:
+                        for zeta in [0]:
                             try:
-                                loss, iterIdx = run(max_iterations, n, d, K, q, adv_win_length, r, randomByzantines, err_mode, mode, approach, alpha,
-                                                    epsilon, zeta, det_win_length, permute_files, seed, logToFile, pointFreq, adversary_const)
+                                loss, iterIdx = run(max_iterations, n, d, K, q, adv_win_length, r, randomByzantines, err_mode, err_choice, mode, approach, alpha,
+                                                    epsilon, zeta, det_win_length, permute_files, seed, logToFile, pointFreq, adversary_const, backtrackLS)
                             except ZeroDivisionError:
                                 print("Error! Aborting due to ZeroDivisionError...\n")
                                 continue
                             except RuntimeWarning:
                                 print("Error! Aborting due to RuntimeWarning...\n")
                                 continue
+                            except AssertionError as e:
+                                if str(e) == HONEST_WORKERS_DISAGREE:
+                                    print("Error! Aborting due to AssertionError...\n")
+                                    continue
+                                else:
+                                    raise e
 
                             # Write the loss for this experiment in a file.
                             # Overwrite previous file, if any.
