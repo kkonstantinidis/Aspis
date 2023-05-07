@@ -102,6 +102,8 @@ if randomByzantines:
 
 # Folder to store logs
 ROOT_LOG_FOLDER = "./Tuning Logs"
+if not os.path.exists(ROOT_LOG_FOLDER):
+    os.mkdir(ROOT_LOG_FOLDER)
 
 for approach in [DETOX]:
     for q in [4]:

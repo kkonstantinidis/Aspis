@@ -80,7 +80,8 @@ else:
     monteCarloFileName = PATH + "/loss_avg_std_Monte_Carlo.txt"
     file_loss = open(monteCarloFileName, 'w')
     file_loss.write("-------------- Generated file --------------\n")
-    file_loss.write("No. of extracted experiments: {}\n".format(len(monteCarloLosses)))
+    file_loss.write("No. of extracted MC experiments: {}\n".format(len(monteCarloLosses)))
+    file_loss.write("Max no. of checkpoints across all MC experiments: {}\n".format(max([len(x) for x in monteCarloLosses])))
     file_loss.write("Max allowed loss for convergence: {}\n\n".format(MAX_LOSS))
     file_loss.write("--------Monte Carlo Average Loss------------\n".format())
     file_loss.write("avg_loss = [" + ",".join(str(x) for x in avgMonteCarloLoss) + "]\n\n")
